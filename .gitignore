@@ -33,7 +33,7 @@ venv.bak/
 
 # ==================== CREDENCIALES ====================
 google-credentials/
-*.json
+
 *.p12
 *.key
 
