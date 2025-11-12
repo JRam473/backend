@@ -14,7 +14,7 @@ build/
 .env.production
 
 # ==================== DOCKER (CRÍTICO!) ====================
-docker-compose.yml    # ← IGNORAR para evitar conflictos en Railway
+docker-compose.yml
 docker-compose.override.yml
 Dockerfile
 .dockerignore
