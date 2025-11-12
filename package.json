@@ -8,18 +8,35 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "start:prod": "NODE_ENV=production node dist/index.js",
+    
+  
     "init-db": "ts-node src/scripts/init-database.ts",
     "init-db:prod": "node dist/scripts/init-database.js",
-    "build-and-init": "npm run build && npm run init-db:prod",
+    "migrate:force": "npm run init-db:prod",
+    
+    
+    "build-and-init": "npm run build && npm run migrate:force",
+    
+    
     "clean": "rm -rf dist",
     "prebuild": "npm run clean",
+    
     "postinstall": "npm run build",
+    
+    
     "railway-build": "npm run build-and-init",
-    "railway-start": "npm run start:prod"
+    "railway-start": "npm run start:prod",
+    
+    
+    "verify-db": "node -e \"require('dotenv').config(); const { probarConexion } = require('./dist/utils/baseDeDatos'); probarConexion().then(console.log).catch(console.error);\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
   "dependencies": {
     "@google-cloud/vision": "^5.3.4",
     "axios": "^1.12.0",
