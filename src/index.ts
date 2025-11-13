@@ -1,4 +1,4 @@
-// ✅ ARCHIVO PRINCIPAL - SOLO EJECUTA init-db.sql
+// ✅ ARCHIVO PRINCIPAL CORREGIDO - RUTAS FIJAS
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -151,15 +151,44 @@ app.use((error: unknown, req: express.Request, res: express.Response, next: expr
   });
 });
 
-// ✅ FUNCIÓN SIMPLIFICADA - SOLO EJECUTA init-db.sql
+// ✅ FUNCIÓN MEJORADA - DETECCIÓN AUTOMÁTICA DE RUTAS (CORREGIDA)
 async function initializeDatabase() {
-  console.log('🔄 INICIANDO MIGRACIÓN COMPLETA CON init-db.sql...');
+  console.log('🔄 INICIANDO MIGRACIÓN COMPLETA...');
   
   try {
-    // ✅ EJECUTAR DIRECTAMENTE EL SCRIPT DE MIGRACIÓN
-    const initScriptPath = process.env.NODE_ENV === 'production' 
-      ? '../scripts/init-database.js'
-      : './scripts/init-database';
+    // ✅ DETECTAR RUTA CORRECTA DEL SCRIPT - INICIALIZADA CON VALOR POR DEFECTO
+    let initScriptPath: string = '';
+    
+    if (process.env.NODE_ENV === 'production') {
+      // En producción: probar diferentes rutas posibles
+      const possiblePaths = [
+        './scripts/init-database.js',      // Railway
+        '../scripts/init-database.js',     // Otra posible ruta
+        './init-database.js',              // Raíz de dist
+        path.join(__dirname, 'scripts/init-database.js') // Ruta absoluta
+      ];
+      
+      for (const possiblePath of possiblePaths) {
+        try {
+          // Verificar si el módulo existe
+          require.resolve(possiblePath);
+          initScriptPath = possiblePath;
+          console.log(`✅ Encontrado script en: ${possiblePath}`);
+          break;
+        } catch (e) {
+          // Continuar con la siguiente ruta
+          continue;
+        }
+      }
+      
+      // ✅ VERIFICAR QUE SE ENCONTRÓ UNA RUTA VÁLIDA
+      if (!initScriptPath) {
+        throw new Error('No se pudo encontrar el script de migración en producción');
+      }
+    } else {
+      // En desarrollo: usar TypeScript directamente
+      initScriptPath = './scripts/init-database';
+    }
     
     console.log(`📂 Ejecutando: ${initScriptPath}`);
     
@@ -170,7 +199,6 @@ async function initializeDatabase() {
     return true;
     
   } catch (error: unknown) {
-    // ✅ CORREGIDO: Manejo seguro de errores unknown
     const errorMessage = error instanceof Error ? error.message : 'Error desconocido en migración';
     
     console.error('💥 ERROR CRÍTICO en migración:', errorMessage);
@@ -181,7 +209,6 @@ async function initializeDatabase() {
 }
 
 // ✅ INICIALIZACIÓN DEL SERVIDOR - SIN FALLBACK
-// ✅ CORREGIDO: Asegurar que PORT sea número
 const PORT = parseInt(process.env.PORT || '4000');
 
 const iniciarServidor = async () => {
@@ -255,7 +282,6 @@ const iniciarServidor = async () => {
     });
 
   } catch (error: unknown) {
-    // ✅ CORREGIDO: Manejo seguro de errores unknown
     const errorMessage = error instanceof Error ? error.message : 'Error crítico desconocido';
     
     console.error('💥 ERROR CRÍTICO AL INICIAR SERVIDOR:', errorMessage);
