@@ -1,4 +1,4 @@
-// ✅ ARCHIVO PRINCIPAL SIMPLIFICADO
+// ✅ ARCHIVO PRINCIPAL - SOLO EJECUTA init-db.sql
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -74,16 +74,10 @@ app.get('/api/debug/tables', async (req, res) => {
 
 // ✅ RUTAS PÚBLICAS
 app.use('/api/auth', autenticacionRoutes);
-
-// ✅ RUTAS DE MODERACIÓN
 app.use('/api/moderacion', moderacionRoutes);
-
-// ✅ RUTAS CON MODERACIÓN INTEGRADA
 app.use('/api/lugares', lugarRoutes);
 app.use('/api/experiencias', experienciaRoutes);
 app.use('/api/calificaciones', calificacionRoutes);
-
-// ✅ RUTAS PROTEGIDAS (admin)
 app.use('/api/admin', administradorRoutes);
 app.use('/api/archivos', archivosRoutes);
 
@@ -143,106 +137,80 @@ app.use('/api/', (req, res) => {
   });
 });
 
-// ✅ MANEJO GLOBAL DE ERRORES
-app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+// ✅ MANEJO GLOBAL DE ERRORES (CORREGIDO)
+app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('❌ Error global no manejado:', error);
+  
+  const errorMessage = error instanceof Error ? error.message : 'Error interno del servidor';
+  const errorDetail = process.env.NODE_ENV === 'development' ? errorMessage : undefined;
+  
   res.status(500).json({
     success: false,
     error: 'Error interno del servidor',
-    detalle: process.env.NODE_ENV === 'development' ? error.message : undefined
+    detalle: errorDetail
   });
 });
 
-// ✅ FUNCIÓN PARA INICIALIZAR BASE DE DATOS
+// ✅ FUNCIÓN SIMPLIFICADA - SOLO EJECUTA init-db.sql
 async function initializeDatabase() {
-  console.log('🔄 Verificando estructura de la base de datos...');
+  console.log('🔄 INICIANDO MIGRACIÓN COMPLETA CON init-db.sql...');
   
   try {
-    // Verificar si las tablas principales existen
-    const tablesCheck = await pool.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_name IN ('administradores', 'lugares', 'experiencias')
-    `);
-
-    const existingTables = tablesCheck.rows.map((row: any) => row.table_name);
+    // ✅ EJECUTAR DIRECTAMENTE EL SCRIPT DE MIGRACIÓN
+    const initScriptPath = process.env.NODE_ENV === 'production' 
+      ? '../scripts/init-database.js'
+      : './scripts/init-database';
     
-    if (existingTables.length >= 3) {
-      console.log('✅ Tablas principales ya existen:', existingTables);
-      return true;
-    }
-
-    console.log('📋 Algunas tablas no existen, ejecutando inicialización...');
+    console.log(`📂 Ejecutando: ${initScriptPath}`);
     
-    // Importar y ejecutar el script de inicialización
-    try {
-      // En producción, el archivo compilado estará en dist/scripts
-      const initScriptPath = process.env.NODE_ENV === 'production' 
-        ? '../scripts/init-database.js'
-        : './scripts/init-database';
-      
-      const { initializeDatabase } = require(initScriptPath);
-      await initializeDatabase();
-      console.log('✅ Base de datos inicializada exitosamente');
-      return true;
-    } catch (initError) {
-      console.error('❌ Error ejecutando script de inicialización:', initError);
-      
-      // Fallback: crear tablas básicas manualmente
-      console.log('🔄 Intentando creación manual de tablas...');
-      await createBasicTables();
-      return true;
-    }
-  } catch (error) {
-    console.error('❌ Error verificando/inicializando base de datos:', error);
-    return false;
+    const { initializeDatabase: runMigration } = require(initScriptPath);
+    await runMigration();
+    
+    console.log('✅ Migración completa ejecutada exitosamente');
+    return true;
+    
+  } catch (error: unknown) {
+    // ✅ CORREGIDO: Manejo seguro de errores unknown
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido en migración';
+    
+    console.error('💥 ERROR CRÍTICO en migración:', errorMessage);
+    
+    // ❌ NO HAY FALLBACK - SI FALLA, EL SERVIDOR NO INICIA
+    throw new Error(`Fallo en migración de BD: ${errorMessage}`);
   }
 }
 
-// ✅ FUNCIÓN DE FALLBACK PARA CREAR TABLAS BÁSICAS
-async function createBasicTables() {
-  try {
-    // Tabla de administradores básica
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS administradores (
-        id SERIAL PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        nombre VARCHAR(255),
-        es_administrador BOOLEAN DEFAULT TRUE,
-        creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Insertar admin por defecto
-    await pool.query(`
-      INSERT INTO administradores (email, nombre, es_administrador) 
-      VALUES ($1, $2, $3)
-      ON CONFLICT (email) DO NOTHING
-    `, ['juanramiro139@gmail.com', 'Juan Ramiro', true]);
-
-    console.log('✅ Tablas básicas creadas exitosamente');
-  } catch (error) {
-    console.error('❌ Error creando tablas básicas:', error);
-    throw error;
-  }
-}
-
-// ✅ INICIALIZACIÓN DEL SERVIDOR
-const PORT = process.env.PORT || 4000;
+// ✅ INICIALIZACIÓN DEL SERVIDOR - SIN FALLBACK
+// ✅ CORREGIDO: Asegurar que PORT sea número
+const PORT = parseInt(process.env.PORT || '4000');
 
 const iniciarServidor = async () => {
   try {
+    console.log('🚀 INICIANDO SERVIDOR TAHITIC...');
+    console.log('🏷️  Ambiente:', process.env.NODE_ENV);
+    console.log('🌐 Puerto:', PORT);
+    
     // ✅ VERIFICAR CONEXIÓN A BD
     console.log('🔌 Verificando conexión a la base de datos...');
     await pool.query('SELECT NOW()');
     console.log('✅ Conectado a la base de datos PostgreSQL');
 
-    // ✅ INICIALIZAR BASE DE DATOS (TABLAS)
-    const dbInitialized = await initializeDatabase();
-    if (!dbInitialized) {
-      throw new Error('No se pudo inicializar la base de datos');
-    }
+    // ✅ EJECUTAR MIGRACIÓN COMPLETA (SIN FALLBACK)
+    console.log('🔄 EJECUTANDO MIGRACIÓN COMPLETA...');
+    await initializeDatabase();
+    
+    console.log('✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE');
+
+    // ✅ VERIFICAR TABLAS CREADAS
+    const tables = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `);
+    
+    console.log('📊 TABLAS CREADAS:', tables.rows.map((row: any) => row.table_name));
+    console.log('🎉 TOTAL TABLAS:', tables.rows.length);
 
     // ✅ INICIALIZAR SERVICIOS DE MODERACIÓN
     console.log('🔄 Inicializando servicios de moderación...');
@@ -250,64 +218,47 @@ const iniciarServidor = async () => {
     const moderacionImagenService = new ModeracionImagenService();
     console.log('✅ Servicios de moderación listos');
 
-    // ✅ MONITOREO PERIÓDICO SIMPLE
+    // ✅ MONITOREO PERIÓDICO (CORREGIDO)
     const intervaloMonitoreo = setInterval(async () => {
       try {
-        const logsTextoRecientes = await pool.query(`
-          SELECT COUNT(*) as total 
-          FROM logs_moderacion 
-          WHERE creado_en >= NOW() - INTERVAL '1 hour'
-        `);
-        
-        const logsImagenesRecientes = await pool.query(`
-          SELECT COUNT(*) as total 
-          FROM logs_moderacion_imagenes 
-          WHERE creado_en >= NOW() - INTERVAL '1 hour'
-        `);
-        
-        const totalTexto = parseInt(logsTextoRecientes.rows[0].total);
-        const totalImagenes = parseInt(logsImagenesRecientes.rows[0].total);
-        
-        if (totalTexto > 0 || totalImagenes > 0) {
-          console.log(`📊 Moderación: ${totalTexto} textos + ${totalImagenes} imágenes en la última hora`);
-        }
-      } catch (error) {
-        console.error('❌ Error en monitoreo periódico:', error);
+        await pool.query('SELECT 1 FROM administradores LIMIT 1');
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+        console.error('❌ Error en verificación periódica de BD:', errorMessage);
       }
-    }, 30 * 60 * 1000); // Cada 30 minutos
+    }, 15 * 60 * 1000);
 
     // ✅ MANEJO GRACCIOSO DE APAGADO
     const shutdown = async () => {
       console.log('🛑 Apagando servidor...');
       clearInterval(intervaloMonitoreo);
-      
-      try {
-        await pool.end();
-        console.log('✅ Conexión a BD cerrada');
-      } catch (error) {
-        console.error('❌ Error cerrando conexión a BD:', error);
-      }
-      
+      await pool.end();
+      console.log('✅ Conexión a BD cerrada');
       process.exit(0);
     };
 
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    // ✅ INICIAR SERVIDOR
-    app.listen(PORT, () => {
-      console.log('\n=== ✅ SISTEMA DE MODERACIÓN INICIALIZADO ===');
-      console.log('🌐 Puerto:', PORT);
-      console.log('🗄️  BD:', process.env.DB_NAME || 'PostgreSQL Railway');
+    // ✅ INICIAR SERVIDOR (CORREGIDO)
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log('\n' + '='.repeat(60));
+      console.log('🎉 SERVIDOR TAHITIC INICIADO CORRECTAMENTE');
+      console.log('🌐 URL: http://localhost:' + PORT);
+      console.log('🏷️  Ambiente:', process.env.NODE_ENV);
+      console.log('🗄️  Base de datos:', 'PostgreSQL Railway');
+      console.log('📊 Tablas totales:', tables.rows.length);
       console.log('🔐 JWT:', process.env.JWT_SECRET ? '✅ Configurado' : '❌ Faltante');
-      console.log('📝 Análisis de texto:', '✅ ACTIVO');
-      console.log('🖼️ Análisis de imágenes:', '✅ ACTIVO');
-      console.log('🚀 Servidor ejecutándose en puerto', PORT);
-      console.log('============================================\n');
+      console.log('📝 Moderación texto:', '✅ ACTIVO');
+      console.log('🖼️ Moderación imágenes:', '✅ ACTIVO');
+      console.log('='.repeat(60) + '\n');
     });
 
-  } catch (error) {
-    console.error('❌ Error crítico al iniciar servidor:', error);
+  } catch (error: unknown) {
+    // ✅ CORREGIDO: Manejo seguro de errores unknown
+    const errorMessage = error instanceof Error ? error.message : 'Error crítico desconocido';
+    
+    console.error('💥 ERROR CRÍTICO AL INICIAR SERVIDOR:', errorMessage);
     
     try {
       await pool.end();

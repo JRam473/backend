@@ -1,4 +1,5 @@
 
+--/src/scripts/init-db.sql
 -- Extensión para UUIDs
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
