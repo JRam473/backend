@@ -162,19 +162,22 @@ async function initializeDatabase() {
     if (process.env.NODE_ENV === 'production') {
       // En producción: probar diferentes rutas posibles
       const possiblePaths = [
-        './scripts/init-database.js',      // Railway
-        '../scripts/init-database.js',     // Otra posible ruta
-        './init-database.js',              // Raíz de dist
-        path.join(__dirname, 'scripts/init-database.js') // Ruta absoluta
+        path.join(__dirname, 'scripts/init-database.js'), // Ruta absoluta desde dist
+        path.join(process.cwd(), 'dist/scripts/init-database.js'), // Ruta desde raíz
+        path.join(process.cwd(), 'scripts/init-database.js'), // Ruta desarrollo compilada
+        './scripts/init-database.js',
+        '../scripts/init-database.js'
       ];
       
       for (const possiblePath of possiblePaths) {
         try {
-          // Verificar si el módulo existe
-          require.resolve(possiblePath);
-          initScriptPath = possiblePath;
-          console.log(`✅ Encontrado script en: ${possiblePath}`);
-          break;
+          // Verificar si el archivo existe
+          const fs = require('fs');
+          if (fs.existsSync(possiblePath)) {
+            initScriptPath = possiblePath;
+            console.log(`✅ Encontrado script en: ${possiblePath}`);
+            break;
+          }
         } catch (e) {
           // Continuar con la siguiente ruta
           continue;
@@ -187,7 +190,7 @@ async function initializeDatabase() {
       }
     } else {
       // En desarrollo: usar TypeScript directamente
-      initScriptPath = './scripts/init-database';
+      initScriptPath = path.join(__dirname, '../scripts/init-database');
     }
     
     console.log(`📂 Ejecutando: ${initScriptPath}`);
