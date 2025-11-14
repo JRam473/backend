@@ -16,7 +16,7 @@ export class ModeloClient {
   private timeout: number;
 
   constructor() {
-    this.baseUrl = process.env.MODEL_SERVER_URL || 'http://localhost:5000';
+    this.baseUrl = process.env.MODEL_SERVER_URL || 'https://model-server-4q80.onrender.com ';
     this.timeout = 15000;
   }
 
