@@ -1,18 +1,16 @@
-// services/ClipAnalyzerService.ts - VERSIÓN EQUIVALENTE AL PYTHON
+// services/ClipAnalyzerService.ts - VERSIÓN COMMONJS
 import { pipeline, RawImage } from '@xenova/transformers';
-import { ClipAnalysisResult, CategoryScore, ClipHealthStatus } from '../types/ClipTypes';
+
+// Usar importación dinámica para evitar problemas ESM
+let classifier: any = null;
 
 export class ClipAnalyzerService {
-  private classifier: any = null;
   private cargado: boolean = false;
   private inicializacionEnCurso: boolean = false;
   
-  // ✅ CATEGORÍAS EQUIVALENTES AL PYTHON - MÍNIMAS PERO EFECTIVAS
   private readonly categorias: string[] = [
-    // Contenido peligroso (alto riesgo)
     "violence", "blood", "weapon", "gun", "knife",
     "nudity", "sexual content", "drugs",
-    // Contenido seguro (bajo riesgo)  
     "safe", "normal", "peaceful"
   ];
 
@@ -26,8 +24,11 @@ export class ClipAnalyzerService {
 
     try {
       console.log("📦 Cargando modelo CLIP...");
-      // ✅ USAR MODELO MÁS PEQUEÑO EQUIVALENTE
-      this.classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32');
+      
+      // Importación dinámica para evitar problemas ESM
+      const { pipeline } = await import('@xenova/transformers');
+      classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32');
+      
       this.cargado = true;
       console.log("✅ Modelo CLIP cargado correctamente");
       return true;
@@ -40,19 +41,20 @@ export class ClipAnalyzerService {
     }
   }
 
-  async analizarImagen(imagePath: string): Promise<ClipAnalysisResult> {
-    if (!this.cargado) throw new Error("Modelo CLIP no cargado");
+  async analizarImagen(imagePath: string): Promise<any> {
+    if (!this.cargado || !classifier) {
+      throw new Error("Modelo CLIP no cargado");
+    }
 
     const inicio = Date.now();
 
     try {
-      // ✅ CARGAR IMAGEN CON OPTIMIZACIÓN
+      const { RawImage } = await import('@xenova/transformers');
       const image = await RawImage.read(imagePath);
-      const resultado = await this.classifier(image, this.categorias);
+      const resultado = await classifier(image, this.categorias);
       
       const duracion = (Date.now() - inicio) / 1000;
       
-      // Procesamiento equivalente al Python
       const puntuaciones: Record<string, number> = {};
       resultado.forEach((item: any) => {
         puntuaciones[item.label] = item.score;
@@ -63,16 +65,14 @@ export class ClipAnalyzerService {
         console.log(`   ${categoria}: ${(puntuacion * 100).toFixed(2)}%`);
       });
 
-      // ✅ LÓGICA IDÉNTICA AL PYTHON - UMBRALES BAJOS
       const esApto = this.calcularEsAptoPythonStyle(puntuaciones);
       const puntuacionRiesgo = this.calcularPuntuacionRiesgoPythonStyle(puntuaciones);
       const contenidoDetectado = this.obtenerContenidoDetectadoPythonStyle(puntuaciones);
 
       console.log(`📊 DECISIÓN FINAL: ${esApto ? '✅ APTO' : '❌ NO APTO'}`);
       console.log(`📈 Puntuación riesgo máximo: ${(puntuacionRiesgo * 100).toFixed(2)}%`);
-      console.log(`🎯 Contenido detectado:`, contenidoDetectado);
 
-      const resultadoFinal: ClipAnalysisResult = {
+      const resultadoFinal = {
         es_apto: esApto,
         puntuacion_riesgo: puntuacionRiesgo,
         tiempo_procesamiento: Math.round(duracion * 100) / 100,
@@ -83,9 +83,8 @@ export class ClipAnalyzerService {
         detectados: contenidoDetectado
       };
 
-      // Agregar razones de rechazo si no es apto
       if (!esApto) {
-        resultadoFinal.razones_rechazo = this.obtenerRazonesRechazoPythonStyle(puntuaciones);
+        (resultadoFinal as any).razones_rechazo = this.obtenerRazonesRechazoPythonStyle(puntuaciones);
       }
 
       return resultadoFinal;
@@ -96,21 +95,20 @@ export class ClipAnalyzerService {
     }
   }
 
-  // ✅ LÓGICA IDÉNTICA AL PYTHON - UMBRAL BAJO 0.2, DECISIÓN BINARIA SIMPLE
+  // ... el resto de los métodos se mantienen igual
   private calcularEsAptoPythonStyle(puntuaciones: Record<string, number>): boolean {
     const categoriasPeligrosas = [
       "violence", "blood", "weapon", "gun", "knife",
       "nudity", "sexual content", "drugs"
     ];
     
-    let contenidoPeligroso = [];
+    let contenidoPeligroso: any[] = [];
     let maxRiesgo = 0.0;
 
-    // ✅ ANALIZAR SOLO RESULTADOS RELEVANTES (umbral 0.2 como en Python)
     categoriasPeligrosas.forEach(categoria => {
       const probabilidad = puntuaciones[categoria] || 0;
       
-      if (probabilidad > 0.2) { // ✅ UMBRAL IDÉNTICO AL PYTHON
+      if (probabilidad > 0.2) {
         if (probabilidad > maxRiesgo) {
           maxRiesgo = probabilidad;
         }
@@ -122,10 +120,7 @@ export class ClipAnalyzerService {
       }
     });
 
-    // ✅ DECISIÓN BINARIA SIMPLE IDÉNTICA AL PYTHON
-    // es_apto = len(contenido_peligroso) == 0 or max_riesgo < 0.4
     const esApto = contenidoPeligroso.length === 0 || maxRiesgo < 0.4;
-
     console.log(`🔍 Análisis Python-style: ${contenidoPeligroso.length} categorías peligrosas, max riesgo: ${(maxRiesgo * 100).toFixed(2)}%`);
 
     return esApto;
@@ -160,7 +155,7 @@ export class ClipAnalyzerService {
     categoriasPeligrosas.forEach(categoria => {
       const probabilidad = puntuaciones[categoria] || 0;
       
-      if (probabilidad > 0.2) { // ✅ Mismo umbral que Python
+      if (probabilidad > 0.2) {
         detectados.push({
           concepto: categoria,
           probabilidad: probabilidad
@@ -190,7 +185,6 @@ export class ClipAnalyzerService {
     return razones;
   }
 
-  // Métodos de estado
   estaListo(): boolean {
     return this.cargado;
   }
@@ -199,7 +193,7 @@ export class ClipAnalyzerService {
     return this.inicializacionEnCurso;
   }
 
-  obtenerEstado(): ClipHealthStatus {
+  obtenerEstado(): any {
     return {
       status: this.cargado ? 'ready' : (this.inicializacionEnCurso ? 'initializing' : 'error'),
       modelos_listos: this.cargado,
