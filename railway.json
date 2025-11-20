@@ -5,7 +5,7 @@
     "buildCommand": "npm install && pip install -r scripts/requirements_optimizado.txt && npm run build"
   },
   "deploy": {
-    "startCommand": "npm run start-with-models",
+    "startCommand": "npm run start",
     "restartPolicyType": "ON_FAILURE"
   }
 }
