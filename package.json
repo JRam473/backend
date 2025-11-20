@@ -9,11 +9,10 @@
     "start": "node dist/index.js",
     "init-db": "ts-node src/scripts/init-database.ts",
     "build-and-init": "npm run build && npm run init-db",
-    "start-with-models": "concurrently \"npm run model-server\" \"npm run start\"",
-    "model-server": "cd scripts && python modelo_server.py",
     "railway-build": "npm run build-and-init",
-    "railway-start": "npm run start-with-models",
-    "upload:images": "ts-node src/scripts/subidorImagenesAvanzado.ts"
+    "railway-start": "npm run start",
+    "clean": "rm -rf dist node_modules",
+    "test": "echo \"No tests specified\" && exit 0"
   },
   "keywords": [],
   "author": "",
