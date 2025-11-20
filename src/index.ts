@@ -45,41 +45,41 @@ async function initializeApp() {
     const passportModule = await import('./utils/oauth.js');
     passport = passportModule.default;
     
-    const ipNavegadorModule = await import('./middleware/ipNavegador');
+    const ipNavegadorModule = await import('./middleware/ipNavegador.js');
     middlewareIpNavegador = ipNavegadorModule.middlewareIpNavegador;
     
-    const baseDeDatosModule = await import('./utils/baseDeDatos');
+    const baseDeDatosModule = await import('./utils/baseDeDatos.js');
     pool = baseDeDatosModule.pool;
     
-    const clipAnalyzerModule = await import('./services/ClipAnalyzerService');
+    const clipAnalyzerModule = await import('./services/ClipAnalyzerService.js');
     clipAnalyzerService = clipAnalyzerModule.clipAnalyzerService;
     
-    const moderacionServiceModule = await import('./services/moderacionService');
+    const moderacionServiceModule = await import('./services/moderacionService.js');
     ModeracionService = moderacionServiceModule.ModeracionService;
     
-    const moderacionImagenServiceModule = await import('./services/moderacionImagenService');
+    const moderacionImagenServiceModule = await import('./services/moderacionImagenService.js');
     ModeracionImagenService = moderacionImagenServiceModule.ModeracionImagenService;
 
     // ✅ CARGAR RUTAS
-    const administradorRoutesModule = await import('./rutas/administradorRoutes');
+    const administradorRoutesModule = await import('./rutas/administradorRoutes.js');
     administradorRoutes = administradorRoutesModule.default;
     
-    const autenticacionRoutesModule = await import('./rutas/autenticacionRoutes');
+    const autenticacionRoutesModule = await import('./rutas/autenticacionRoutes.js');
     autenticacionRoutes = autenticacionRoutesModule.default;
     
-    const lugarRoutesModule = await import('./rutas/lugarRoutes');
+    const lugarRoutesModule = await import('./rutas/lugarRoutes.js');
     lugarRoutes = lugarRoutesModule.default;
     
-    const experienciaRoutesModule = await import('./rutas/experienciaRoutes');
+    const experienciaRoutesModule = await import('./rutas/experienciaRoutes.js');
     experienciaRoutes = experienciaRoutesModule.default;
     
-    const calificacionRoutesModule = await import('./rutas/calificacionRoutes');
+    const calificacionRoutesModule = await import('./rutas/calificacionRoutes.js');
     calificacionRoutes = calificacionRoutesModule.default;
     
-    const archivosRoutesModule = await import('./rutas/archivosRoutes');
+    const archivosRoutesModule = await import('./rutas/archivosRoutes.js');
     archivosRoutes = archivosRoutesModule.default;
     
-    const moderacionRoutesModule = await import('./rutas/moderacionRoutes');
+    const moderacionRoutesModule = await import('./rutas/moderacionRoutes.js');
     moderacionRoutes = moderacionRoutesModule.default;
 
     // ✅ CONFIGURAR MIDDLEWARES QUE DEPENDEN DE IMPORTS
