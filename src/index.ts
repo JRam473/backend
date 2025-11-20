@@ -42,7 +42,7 @@ async function initializeApp() {
     console.log('🔄 Inicializando aplicación...');
 
     // ✅ CARGAR MÓDULOS DINÁMICAMENTE
-    const passportModule = await import('./utils/oauth');
+    const passportModule = await import('./utils/oauth.js');
     passport = passportModule.default;
     
     const ipNavegadorModule = await import('./middleware/ipNavegador');
