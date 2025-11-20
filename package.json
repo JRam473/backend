@@ -2,15 +2,17 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "Backend con Express, TypeScript y soporte para usuarios, fotos y comentarios",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "nodemon src/index.ts",
+    "dev": "nodemon --exec tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "init-db": "ts-node src/scripts/init-database.ts",
+    "init-db": "node --loader ts-node/esm src/scripts/init-database.ts",
     "build-and-init": "npm run build && npm run init-db",
     "railway-build": "npm run build-and-init",
     "railway-start": "npm run start",
+    "upload:images": "node --loader ts-node/esm src/scripts/subidorImagenesAvanzado.ts",
     "clean": "rm -rf dist node_modules",
     "test": "echo \"No tests specified\" && exit 0"
   },
@@ -38,8 +40,7 @@
     "node-fetch": "^2.7.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
-    "pdf-parse": "^1.1.1",
-    "pdf-poppler": "^0.2.3",
+    "pdf-parse": "^1.1.4",
     "pdf2pic": "^3.2.0",
     "pg": "^8.16.3",
     "sharp": "^0.34.4",
@@ -70,6 +71,10 @@
     "@types/tmp": "^0.2.6",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

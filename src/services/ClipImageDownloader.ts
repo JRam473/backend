@@ -1,8 +1,8 @@
+// services/ClipImageDownloader.ts - VERSIÓN CORREGIDA
 import axios from 'axios';
 import fs from 'fs-extra';
 import tmp from 'tmp';
 import { URL } from 'url';
-import { } from '../types/ClipTypes';
 
 export interface DownloadResult {
   success: boolean;
@@ -31,13 +31,15 @@ export class ClipImageDownloader {
         return { success: false, error: "URL debe usar HTTP/HTTPS" };
       }
 
-      const response = await axios({
-        method: 'GET',
+      const config = {
+        method: 'get',
         url: url,
-        responseType: 'stream',
+        responseType: 'stream' as const,
         timeout: this.timeout,
-        maxContentLength: this.maxSizeMB * 1024 * 1024,
-      });
+        maxContentLength: this.maxSizeMB * 1024 * 1024
+      };
+
+      const response = await axios(config);
 
       // Verificar tipo de contenido
       const contentType = response.headers['content-type'];
@@ -52,7 +54,10 @@ export class ClipImageDownloader {
       return new Promise((resolve) => {
         let downloadedSize = 0;
         
-        response.data.on('data', (chunk: Buffer) => {
+        // ✅ TYPECAST CORREGIDO
+        const stream = response.data as NodeJS.ReadableStream;
+        
+        stream.on('data', (chunk: Buffer) => {
           downloadedSize += chunk.length;
           if (downloadedSize > this.maxSizeMB * 1024 * 1024) {
             writer.destroy();
@@ -61,7 +66,7 @@ export class ClipImageDownloader {
           }
         });
 
-        response.data.pipe(writer);
+        stream.pipe(writer);
 
         writer.on('finish', () => {
           console.log(`✅ Imagen descargada: ${downloadedSize} bytes`);

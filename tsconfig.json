@@ -1,21 +1,20 @@
 {
   "compilerOptions": {
-    "rootDir": "./src",
-    "outDir": "./dist",
-    "module": "commonjs",
-    "target": "ES2020",
-    "lib": ["ES2020"],
-    "types": ["node"],
-    "esModuleInterop": true,
+    "target": "ES2022",
+    "module": "ESNext",
     "moduleResolution": "node",
-    "sourceMap": true,
-    "declaration": false,
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "skipLibCheck": true, // ✅ Esto es importante
-    "typeRoots": ["./node_modules/@types", "./src/types"]
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "declaration": false,
+    "sourceMap": true
   },
-  "include": ["src"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

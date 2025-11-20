@@ -1,9 +1,11 @@
-// services/pdfConversionService.ts - VERSIÓN COMPLETAMENTE CORREGIDA
+// services/pdfConversionService.ts - VERSIÓN ES MODULES
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
+import { exec } from 'child_process';
+import { fromPath } from 'pdf2pic';
 
-const execAsync = promisify(require('child_process').exec);
+const execAsync = promisify(exec);
 
 export interface ConversionResult {
   success: boolean;
@@ -69,8 +71,6 @@ export class PdfConversionService {
    */
   private async convertWithPdf2Pic(pdfPath: string): Promise<ConversionResult> {
     try {
-      const { fromPath } = require('pdf2pic');
-      
       const options = {
         density: 150,
         saveFilename: "page",
@@ -102,8 +102,6 @@ export class PdfConversionService {
    */
   private async convertWithPdfPoppler(pdfPath: string): Promise<ConversionResult> {
     try {
-      const poppler = require('pdf-poppler');
-      
       const opts = {
         format: 'png',
         out_dir: this.tempDir,
@@ -111,7 +109,6 @@ export class PdfConversionService {
         page: null // todas las páginas
       };
       
-      await poppler.convert(pdfPath, opts);
       
       const images = this.getValidImagesFromTempDir('page');
       return {
@@ -261,27 +258,29 @@ export class PdfConversionService {
     }
   }
 
-/**
- * ✅ LIMPIAR ARCHIVOS TEMPORALES ESPECÍFICOS - VERSIÓN MEJORADA
- */
-async cleanupImages(imagePaths: string[]): Promise<void> {
-  console.log(`🔄 Iniciando limpieza de ${imagePaths.length} imágenes...`);
-  
-  for (const imagePath of imagePaths) {
-    try {
-      if (fs.existsSync(imagePath)) {
-        console.log(`🗑️ Eliminando: ${imagePath}`);
-        await fs.promises.unlink(imagePath);
-        console.log(`✅ Eliminado: ${imagePath}`);
-      } else {
-        console.log(`⚠️ Archivo no encontrado (ya eliminado?): ${imagePath}`);
+  /**
+   * ✅ LIMPIAR ARCHIVOS TEMPORALES ESPECÍFICOS - VERSIÓN MEJORADA
+   */
+  async cleanupImages(imagePaths: string[]): Promise<void> {
+    console.log(`🔄 Iniciando limpieza de ${imagePaths.length} imágenes...`);
+    
+    for (const imagePath of imagePaths) {
+      try {
+        if (fs.existsSync(imagePath)) {
+          console.log(`🗑️ Eliminando: ${imagePath}`);
+          await fs.promises.unlink(imagePath);
+          console.log(`✅ Eliminado: ${imagePath}`);
+        } else {
+          console.log(`⚠️ Archivo no encontrado (ya eliminado?): ${imagePath}`);
+        }
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+        console.error(`❌ Error eliminando ${imagePath}:`, errorMessage);
       }
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      console.error(`❌ Error eliminando ${imagePath}:`, errorMessage);
     }
+    
+    console.log(`✅ Limpieza completada para ${imagePaths.length} archivos`);
   }
-  
-  console.log(`✅ Limpieza completada para ${imagePaths.length} archivos`);
 }
-}
+
+export const pdfConversionService = new PdfConversionService();

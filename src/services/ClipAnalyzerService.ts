@@ -1,10 +1,8 @@
-// services/ClipAnalyzerService.ts - VERSIÓN COMMONJS
-import { pipeline, RawImage } from '@xenova/transformers';
-
+// services/ClipAnalyzerService.ts - VERSIÓN CORREGIDA
 // Usar importación dinámica para evitar problemas ESM
-let classifier: any = null;
 
 export class ClipAnalyzerService {
+  private classifier: any = null;
   private cargado: boolean = false;
   private inicializacionEnCurso: boolean = false;
   
@@ -25,9 +23,9 @@ export class ClipAnalyzerService {
     try {
       console.log("📦 Cargando modelo CLIP...");
       
-      // Importación dinámica para evitar problemas ESM
+      // ✅ IMPORTACIÓN DINÁMICA CORREGIDA
       const { pipeline } = await import('@xenova/transformers');
-      classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32');
+      this.classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32');
       
       this.cargado = true;
       console.log("✅ Modelo CLIP cargado correctamente");
@@ -42,16 +40,17 @@ export class ClipAnalyzerService {
   }
 
   async analizarImagen(imagePath: string): Promise<any> {
-    if (!this.cargado || !classifier) {
+    if (!this.cargado || !this.classifier) {
       throw new Error("Modelo CLIP no cargado");
     }
 
     const inicio = Date.now();
 
     try {
+      // ✅ IMPORTACIÓN DINÁMICA PARA RawImage
       const { RawImage } = await import('@xenova/transformers');
       const image = await RawImage.read(imagePath);
-      const resultado = await classifier(image, this.categorias);
+      const resultado = await this.classifier(image, this.categorias);
       
       const duracion = (Date.now() - inicio) / 1000;
       
@@ -95,7 +94,6 @@ export class ClipAnalyzerService {
     }
   }
 
-  // ... el resto de los métodos se mantienen igual
   private calcularEsAptoPythonStyle(puntuaciones: Record<string, number>): boolean {
     const categoriasPeligrosas = [
       "violence", "blood", "weapon", "gun", "knife",

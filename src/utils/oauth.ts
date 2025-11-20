@@ -1,4 +1,4 @@
-import e from 'express';
+// utils/oauth.ts - VERSIÓN CORREGIDA
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 
