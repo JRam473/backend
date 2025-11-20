@@ -983,6 +983,62 @@ export class PdfAnalysisService {
     
     return inicio + '\n\n...[texto recortado]...\n\n' + fin;
   }
+  /**
+   * Validación rápida de PDF
+   */
+  async validarPDFBasico(rutaArchivo: string): Promise<{
+    valido: boolean;
+    error?: string;
+    tamano?: number;
+    esPDF?: boolean;
+    recomendacion?: string;
+  }> {
+    try {
+      const stats = fs.statSync(rutaArchivo);
+      
+      if (stats.size > 15 * 1024 * 1024) { // ✅ Aumentado a 15MB
+        return {
+          valido: false,
+          error: 'El PDF es demasiado grande (máximo 15MB)',
+          tamano: stats.size,
+          recomendacion: 'Reduzca el tamaño del PDF o divida en archivos más pequeños'
+        };
+      }
+
+      const buffer = Buffer.alloc(4);
+      const fd = fs.openSync(rutaArchivo, 'r');
+      fs.readSync(fd, buffer, 0, 4, 0);
+      fs.closeSync(fd);
+      
+      const esPDF = buffer.toString().startsWith('%PDF');
+      
+      if (!esPDF) {
+        return {
+          valido: false,
+          error: 'El archivo no es un PDF válido',
+          esPDF: false,
+          recomendacion: 'Asegúrese de que el archivo sea un PDF válido'
+        };
+      }
+
+      return {
+        valido: true,
+        tamano: stats.size,
+        esPDF: true,
+        recomendacion: 'PDF válido - listo para análisis'
+      };
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      return {
+        valido: false,
+        error: 'No se pudo validar el archivo PDF: ' + errorMessage,
+        recomendacion: 'Verifique que el archivo exista y sea accesible'
+      };
+    }
+  }
+
+
 }
 
 export const pdfAnalysisService = new PdfAnalysisService();
