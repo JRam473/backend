@@ -1,12 +1,13 @@
-// controladores/experienciaController.ts - VERSIÓN CORREGIDA
+// controladores/experienciaController.ts - VERSIÓN CLOUDINARY
 import { pool } from '../utils/baseDeDatos';
 import { generarHashNavegador } from '../utils/hashNavegador';
 import { ModeracionService } from '../services/moderacionService';
 import { ModeracionImagenService } from '../services/moderacionImagenService';
+import { CloudinaryService } from '../services/cloudinaryService'; // 🆕 NUEVO
 import { Request, Response } from 'express';
 import fs from 'fs/promises';
 
-// ✅ MOVER FUNCIONES AUXILIARES FUERA DE LA CLASE
+// ✅ FUNCIONES AUXILIARES (se mantienen igual)
 const generarSugerencias = (tipoProblema: string): string[] => {
   const sugerencias: string[] = [];
   
@@ -64,7 +65,7 @@ const analizarMotivoRechazo = (resultadoModeracion: any): {
   return { mensajeUsuario, tipoProblema, detallesEspecificos };
 };
 
-// ✅ FUNCIÓN CORREGIDA PARA MODERAR NOMBRE DE USUARIO (SOLO 3 ARGUMENTOS)
+// ✅ FUNCIÓN PARA MODERAR NOMBRE DE USUARIO (se mantiene igual)
 const moderarNombreUsuario = async (
   nombreUsuario: string | undefined, 
   ipUsuario: string, 
@@ -72,14 +73,12 @@ const moderarNombreUsuario = async (
   moderacionService: ModeracionService
 ): Promise<{ esAprobado: boolean; motivoRechazo?: string; detalles?: any }> => {
   
-  // Si no se proporciona nombre de usuario, es aprobado automáticamente (será "Usuario Anónimo")
   if (!nombreUsuario || !nombreUsuario.trim()) {
     return { esAprobado: true };
   }
 
   const nombreLimpio = nombreUsuario.trim();
 
-  // Validaciones básicas de longitud
   if (nombreLimpio.length > 50) {
     return { 
       esAprobado: false, 
@@ -94,14 +93,11 @@ const moderarNombreUsuario = async (
     };
   }
 
-  // ✅ ANÁLISIS DE TEXTO PARA EL NOMBRE DE USUARIO (SOLO 3 ARGUMENTOS)
   try {
-    // ✅ CORREGIDO: Usar solo 3 argumentos como espera moderarTexto
     const resultadoModeracion = await moderacionService.moderarTexto(
       nombreLimpio,
       ipUsuario,
       hashNavegador
-      // ❌ ELIMINADO: 'nombre_usuario' // Este cuarto argumento causaba el error
     );
 
     if (!resultadoModeracion.esAprobado) {
@@ -118,16 +114,17 @@ const moderarNombreUsuario = async (
     };
   } catch (error) {
     console.error('❌ Error en moderación de nombre de usuario:', error);
-    // En caso de error en la moderación, permitir el nombre pero registrar el error
     return { esAprobado: true };
   }
 };
 
 export const experienciaController = {
   /**
-   * Crear experiencia con moderación DE TEXTO, NOMBRE DE USUARIO E IMAGEN
+   * 🆕 CREAR EXPERIENCIA CON CLOUDINARY
    */
- async crearExperiencia(req: Request, res: Response) {
+  async crearExperiencia(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
     try {
       const file = req.file;
       const { descripcion, lugar_id, nombre_usuario } = req.body;
@@ -145,28 +142,19 @@ export const experienciaController = {
       const moderacionService = new ModeracionService();
       const moderacionImagenService = new ModeracionImagenService();
 
-      // ✅ 1. CREAR Y MODERAR IMAGEN TEMPORAL (TODO EN UN PASO)
+      // ✅ 1. LEER ARCHIVO Y MODERAR IMAGEN DESDE BUFFER
       const fileBuffer = await fs.readFile(file.path);
-      const tempResult = await moderacionImagenService.crearImagenTemporal(fileBuffer, file.filename);
       
-      // Limpiar archivo original inmediatamente
-      await fs.unlink(file.path);
-
-      if (!tempResult.success) {
-        return res.status(500).json({
-          success: false,
-          error: 'Error al procesar imagen'
-        });
-      }
-
-      // Moderar la imagen temporal
-      const resultadoImagen = await moderacionImagenService.moderarImagenExperiencia(
-        tempResult.tempPath!,
+      // Moderar la imagen antes de subirla a Cloudinary
+      const resultadoImagen = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        file.filename,
         ipUsuario,
         hashNavegador
       );
 
       if (!resultadoImagen.esAprobado) {
+        await fs.unlink(file.path);
         return res.status(400).json({
           success: false,
           error: 'IMAGEN_RECHAZADA',
@@ -183,6 +171,7 @@ export const experienciaController = {
       });
 
       if (!resultadoTexto.esAprobado) {
+        await fs.unlink(file.path);
         return res.status(400).json({
           success: false,
           error: 'CONTENIDO_RECHAZADO',
@@ -190,25 +179,40 @@ export const experienciaController = {
         });
       }
 
-      // ✅ 3. CREAR EXPERIENCIA CON RUTA FINAL
+      // ✅ 3. SUBIR A CLOUDINARY
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        file.filename,
+        process.env.CLOUDINARY_EXPERIENCIAS_FOLDER || 'experiencias'
+      );
+
+      // ✅ 4. LIMPIAR ARCHIVO TEMPORAL
+      await fs.unlink(file.path);
+
+      // ✅ 5. CREAR EXPERIENCIA CON URLs DE CLOUDINARY
       const result = await pool.query(
         `INSERT INTO experiencias (
           lugar_id, url_foto, descripcion, ruta_almacenamiento,
-          ip_usuario, hash_navegador, nombre_usuario
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
+          ip_usuario, hash_navegador, nombre_usuario,
+          ancho_imagen, alto_imagen, tamaño_archivo, tipo_archivo, estado
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pendiente') 
         RETURNING *`,
         [
           lugar_id || null,
-          resultadoImagen.rutaFinal,
+          cloudinaryResult.secure_url,    // ← URL de Cloudinary
           descripcion.trim(),
-          resultadoImagen.rutaFinal,
+          cloudinaryResult.public_id,     // ← public_id para eliminación
           ipUsuario,
           hashNavegador,
-          nombre_usuario?.trim() || 'Usuario Anónimo'
+          nombre_usuario?.trim() || 'Usuario Anónimo',
+          cloudinaryResult.width || null,
+          cloudinaryResult.height || null,
+          cloudinaryResult.bytes,
+          `image/${cloudinaryResult.format}`
         ]
       );
 
-      console.log('✅ Experiencia creada con imagen aprobada');
+      console.log('✅ Experiencia creada con Cloudinary');
 
       res.status(201).json({
         success: true,
@@ -217,6 +221,7 @@ export const experienciaController = {
       });
 
     } catch (error) {
+      // Limpiar archivo en caso de error
       if (req.file) {
         await fs.unlink(req.file.path).catch(console.error);
       }
@@ -228,6 +233,7 @@ export const experienciaController = {
       });
     }
   },
+
 
   /**
    * ✅ NUEVO: Validar texto Y nombre de usuario antes de subir archivos multimedia
@@ -663,115 +669,100 @@ export const experienciaController = {
 
 
 
-/**
- * Eliminar experiencia - VERSIÓN MEJORADA CON MÚLTIPLES CRITERIOS
- */
-async eliminarExperiencia(req: Request, res: Response) {
-  try {
-    const { id } = req.params;
-    const hashNavegador = generarHashNavegador(req);
-    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+  /**
+   * 🆕 ELIMINAR EXPERIENCIA CON CLOUDINARY
+   */
+  async eliminarExperiencia(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
+    try {
+      const { id } = req.params;
+      const hashNavegador = generarHashNavegador(req);
+      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
 
-    console.log('🗑️ Intentando eliminar experiencia:', {
-      id,
-      hashNavegador: hashNavegador.substring(0, 10) + '...',
-      ipUsuario
-    });
-
-    // ✅ VERIFICACIÓN MEJORADA: Buscar por múltiples criterios
-    const experienciaExistente = await pool.query(
-      `SELECT * FROM experiencias 
-       WHERE id = $1 
-       AND (hash_navegador = $2 OR ip_usuario = $3)`,
-      [id, hashNavegador, ipUsuario]
-    );
-
-    if (experienciaExistente.rows.length === 0) {
-      console.log('❌ Experiencia no encontrada con los criterios actuales:', {
+      console.log('🗑️ Intentando eliminar experiencia:', {
         id,
         hashNavegador: hashNavegador.substring(0, 10) + '...',
         ipUsuario
       });
 
-      // ✅ DIAGNÓSTICO: Obtener información de la experiencia para debugging
-      const experienciaInfo = await pool.query(
-        'SELECT id, hash_navegador, ip_usuario, creado_en FROM experiencias WHERE id = $1',
-        [id]
+      // ✅ VERIFICACIÓN MEJORADA: Buscar por múltiples criterios
+      const experienciaExistente = await pool.query(
+        `SELECT * FROM experiencias 
+         WHERE id = $1 
+         AND (hash_navegador = $2 OR ip_usuario = $3)`,
+        [id, hashNavegador, ipUsuario]
       );
 
-      if (experienciaInfo.rows.length === 0) {
-        return res.status(404).json({ 
+      if (experienciaExistente.rows.length === 0) {
+        console.log('❌ Experiencia no encontrada con los criterios actuales');
+        
+        // ✅ DIAGNÓSTICO: Obtener información de la experiencia para debugging
+        const experienciaInfo = await pool.query(
+          'SELECT id, hash_navegador, ip_usuario, creado_en FROM experiencias WHERE id = $1',
+          [id]
+        );
+
+        if (experienciaInfo.rows.length === 0) {
+          return res.status(404).json({ 
+            success: false,
+            error: 'Experiencia no encontrada en el sistema'
+          });
+        }
+
+        return res.status(403).json({ 
           success: false,
-          error: 'Experiencia no encontrada en el sistema'
+          error: 'No tienes permisos para eliminar esta experiencia',
+          detalles: {
+            motivo: 'La experiencia fue creada desde un navegador o IP diferente',
+            solucion: 'Intenta desde el mismo navegador y red donde la creaste'
+          }
         });
       }
 
-      const exp = experienciaInfo.rows[0];
-      console.log('🔍 Información de la experiencia encontrada:', {
-        id: exp.id,
-        hash_guardado: exp.hash_navegador ? exp.hash_navegador.substring(0, 10) + '...' : 'null',
-        ip_guardada: exp.ip_usuario,
-        creado_en: exp.creado_en,
-        hash_actual: hashNavegador.substring(0, 10) + '...',
-        ip_actual: ipUsuario
-      });
-
-      return res.status(403).json({ 
-        success: false,
-        error: 'No tienes permisos para eliminar esta experiencia',
-        detalles: {
-          motivo: 'La experiencia fue creada desde un navegador o IP diferente',
-          solucion: 'Intenta desde el mismo navegador y red donde la creaste'
+      // ✅ ELIMINACIÓN: Primero obtener info para limpiar archivos
+      const experiencia = experienciaExistente.rows[0];
+      
+      // ✅ ELIMINAR IMAGEN DE CLOUDINARY SI EXISTE
+      if (experiencia.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(experiencia.url_foto)) {
+        try {
+          await cloudinaryService.eliminarArchivo(experiencia.ruta_almacenamiento);
+          console.log('🗑️ Imagen eliminada de Cloudinary:', experiencia.ruta_almacenamiento);
+        } catch (error) {
+          console.warn('⚠️ No se pudo eliminar la imagen de Cloudinary:', error);
         }
+      }
+
+      // Eliminar de la base de datos
+      const result = await pool.query(
+        'DELETE FROM experiencias WHERE id = $1 RETURNING *',
+        [id]
+      );
+
+      // Limpiar vistas relacionadas
+      await pool.query(
+        'DELETE FROM vistas_experiencias WHERE experiencia_id = $1',
+        [id]
+      );
+
+      console.log('✅ Experiencia eliminada exitosamente de Cloudinary');
+
+      res.json({ 
+        success: true,
+        mensaje: 'Experiencia eliminada exitosamente',
+        experiencia: result.rows[0]
+      });
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('❌ Error eliminando experiencia:', errorMessage);
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al eliminar experiencia',
+        detalles: errorMessage
       });
     }
-
-    // ✅ ELIMINACIÓN: Primero obtener info para limpiar archivos
-    const experiencia = experienciaExistente.rows[0];
-    
-    // Eliminar archivos de imagen si existen
-    if (experiencia.ruta_almacenamiento) {
-      try {
-        await fs.unlink(experiencia.ruta_almacenamiento);
-        console.log('🗑️ Archivo de imagen eliminado:', experiencia.ruta_almacenamiento);
-      } catch (error) {
-        console.warn('⚠️ No se pudo eliminar el archivo de imagen:', error);
-      }
-    }
-
-    // Eliminar de la base de datos
-    const result = await pool.query(
-      'DELETE FROM experiencias WHERE id = $1 RETURNING *',
-      [id]
-    );
-
-    // Limpiar vistas relacionadas
-    await pool.query(
-      'DELETE FROM vistas_experiencias WHERE experiencia_id = $1',
-      [id]
-    );
-
-    console.log('✅ Experiencia eliminada exitosamente:', {
-      id,
-      descripcion: experiencia.descripcion?.substring(0, 50) + '...'
-    });
-
-    res.json({ 
-      success: true,
-      mensaje: 'Experiencia eliminada exitosamente',
-      experiencia: result.rows[0]
-    });
-
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('❌ Error eliminando experiencia:', errorMessage);
-    res.status(500).json({ 
-      success: false,
-      error: 'Error al eliminar experiencia',
-      detalles: errorMessage
-    });
-  }
-},
+  },
 
   /**
    * Obtener experiencias del usuario actual - YA ACTUALIZADO
@@ -1082,10 +1073,12 @@ async eliminarExperiencia(req: Request, res: Response) {
     }
   },
 
-    /**
-   * ✅ NUEVO: Editar experiencia con cambio de imagen - VERSIÓN CORREGIDA
+  /**
+   * 🆕 EDITAR EXPERIENCIA CON IMAGEN - CLOUDINARY
    */
   async editarExperienciaConImagen(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
     try {
       const { id } = req.params;
       const { descripcion, nombre_usuario } = req.body;
@@ -1114,7 +1107,7 @@ async eliminarExperiencia(req: Request, res: Response) {
 
       const actual = experienciaActual.rows[0];
       const moderacionService = new ModeracionService();
-      const moderacionImagenService = new ModeracionImagenService(); // 🆕 NUEVO
+      const moderacionImagenService = new ModeracionImagenService();
 
       // ✅ 1. MODERAR NOMBRE DE USUARIO SI SE ACTUALIZA
       if (nombre_usuario !== undefined && nombre_usuario !== actual.nombre_usuario) {
@@ -1158,7 +1151,6 @@ async eliminarExperiencia(req: Request, res: Response) {
         });
 
         if (!resultadoModeracion.esAprobado) {
-          // ✅ MEJORADO: Buscar log reciente para detalles
           const logReciente = await pool.query(
             `SELECT motivo, resultado_moderacion 
              FROM logs_moderacion 
@@ -1203,24 +1195,24 @@ async eliminarExperiencia(req: Request, res: Response) {
         }
       }
 
-      // ✅ MODERACIÓN DE IMAGEN si hay nueva imagen
+      // ✅ MODERACIÓN Y SUBIDA DE NUEVA IMAGEN A CLOUDINARY
       let nuevaUrlFoto = actual.url_foto;
       let nuevaRutaAlmacenamiento = actual.ruta_almacenamiento;
 
       if (file) {
         console.log('🖼️ Procesando nueva imagen para experiencia:', id);
         
-        // 🆕 CORREGIDO: Usar el servicio de moderación de imágenes
-        const resultadoModeracionImagen = await moderacionImagenService.moderarImagenExperiencia(
-          file.path,
+        // Leer archivo y moderar
+        const fileBuffer = await fs.readFile(file.path);
+        const resultadoModeracionImagen = await moderacionImagenService.moderarImagenDesdeBuffer(
+          fileBuffer,
+          file.filename,
           actual.ip_usuario,
           hashNavegador
         );
 
         if (!resultadoModeracionImagen.esAprobado) {
-          // Eliminar archivo subido
-          await fs.unlink(file.path).catch(console.error);
-          
+          await fs.unlink(file.path);
           return res.status(400).json({
             success: false,
             error: 'IMAGEN_RECHAZADA',
@@ -1240,22 +1232,32 @@ async eliminarExperiencia(req: Request, res: Response) {
           });
         }
 
-        // ✅ Imagen aprobada - construir nuevas URLs
-        nuevaUrlFoto = `${process.env.BASE_URL || 'http://localhost:4000'}/uploads/images/experiencias/${file.filename}`;
-        nuevaRutaAlmacenamiento = file.path;
+        // Subir nueva imagen a Cloudinary
+        const cloudinaryResult = await cloudinaryService.subirArchivo(
+          fileBuffer,
+          file.filename,
+          process.env.CLOUDINARY_EXPERIENCIAS_FOLDER || 'experiencias'
+        );
 
-        // ✅ Eliminar imagen anterior si existe
-        if (actual.ruta_almacenamiento && actual.ruta_almacenamiento !== file.path) {
+        // Limpiar archivo temporal
+        await fs.unlink(file.path);
+
+        // ✅ ELIMINAR IMAGEN ANTERIOR DE CLOUDINARY
+        if (actual.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(actual.url_foto)) {
           try {
-            await fs.unlink(actual.ruta_almacenamiento);
-            console.log('🗑️ Imagen anterior eliminada:', actual.ruta_almacenamiento);
+            await cloudinaryService.eliminarArchivo(actual.ruta_almacenamiento);
+            console.log('🗑️ Imagen anterior eliminada de Cloudinary:', actual.ruta_almacenamiento);
           } catch (error) {
-            console.warn('⚠️ No se pudo eliminar la imagen anterior:', error);
+            console.warn('⚠️ No se pudo eliminar la imagen anterior de Cloudinary:', error);
           }
         }
+
+        // Actualizar URLs
+        nuevaUrlFoto = cloudinaryResult.secure_url;
+        nuevaRutaAlmacenamiento = cloudinaryResult.public_id;
       }
 
-      // ✅ Actualizar experiencia en la base de datos
+      // ✅ ACTUALIZAR EXPERIENCIA EN LA BASE DE DATOS
       const nombreUsuarioFinal = nombre_usuario !== undefined ? 
         (nombre_usuario?.trim() || 'Usuario Anónimo') : 
         actual.nombre_usuario;
@@ -1265,24 +1267,20 @@ async eliminarExperiencia(req: Request, res: Response) {
       let experienciaActualizada;
 
       if (file) {
-        // Si hay archivo, incluir campos de archivo
+        // Si hay nueva imagen, actualizar campos de archivo
         const result = await pool.query(
           `UPDATE experiencias 
            SET descripcion = $1,
                url_foto = $2,
                ruta_almacenamiento = $3,
-               tamaño_archivo = $4,
-               tipo_archivo = $5,
-               nombre_usuario = $6,
+               nombre_usuario = $4,
                actualizado_en = NOW()
-           WHERE id = $7 AND hash_navegador = $8 
+           WHERE id = $5 AND hash_navegador = $6 
            RETURNING *`,
           [
             descripcionFinal,
             nuevaUrlFoto,
             nuevaRutaAlmacenamiento,
-            file.size,
-            file.mimetype,
             nombreUsuarioFinal,
             id,
             hashNavegador
@@ -1310,7 +1308,7 @@ async eliminarExperiencia(req: Request, res: Response) {
         experienciaActualizada = result.rows[0];
       }
 
-      console.log('✅ Experiencia actualizada:', {
+      console.log('✅ Experiencia actualizada en Cloudinary:', {
         id: experienciaActualizada.id,
         nuevaImagen: !!file,
         descripcionCambiada: descripcion !== actual.descripcion,

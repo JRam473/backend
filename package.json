@@ -5,36 +5,22 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon src/index.ts",
-    "build": "tsc && npm run copy-files",
-    "copy-files": "cp -r src/scripts/*.sql dist/scripts/ 2>/dev/null || true && cp -r uploads/ dist/ 2>/dev/null || true",
+    "build": "tsc",
     "start": "node dist/index.js",
-    "start:prod": "NODE_ENV=production node dist/index.js",
-    
     "init-db": "ts-node src/scripts/init-database.ts",
-    "init-db:prod": "node dist/scripts/init-database.js",
-    "migrate:force": "npm run init-db:prod",
-    
-    "build-and-init": "npm run build && npm run migrate:force",
-    
-    "clean": "rm -rf dist",
-    "prebuild": "npm run clean",
-    
-    "postinstall": "npm run build",
-    
+    "build-and-init": "npm run build && npm run init-db",
+    "start-with-models": "concurrently \"npm run model-server\" \"npm run start\"",
+    "model-server": "cd scripts && python modelo_server.py",
     "railway-build": "npm run build-and-init",
-    "railway-start": "npm run start:prod",
-    
-    "verify-db": "node -e \"require('dotenv').config(); const { probarConexion } = require('./dist/utils/baseDeDatos'); probarConexion().then(console.log).catch(console.error);\""
+    "railway-start": "npm run start-with-models",
+    "upload:images": "ts-node src/scripts/subidorImagenesAvanzado.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
-  },
   "dependencies": {
     "@google-cloud/vision": "^5.3.4",
+    "@xenova/transformers": "^2.17.2",
     "axios": "^1.12.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",

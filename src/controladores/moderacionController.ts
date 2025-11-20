@@ -1,3 +1,4 @@
+// backend/src/controladores/moderacionController.ts
 import { Request, Response } from 'express';
 import { ModeracionImagenService } from '../services/moderacionImagenService';
 import { pool } from '../utils/baseDeDatos';
@@ -6,7 +7,7 @@ import fs from 'fs/promises';
 
 export const moderacionController = {
   /**
-   * Analizar imagen independientemente (para testing o uso externo)
+   * ✅ CORREGIDO: Analizar imagen independientemente (compatible con Cloudinary)
    */
   async analizarImagen(req: Request, res: Response) {
     try {
@@ -24,11 +25,17 @@ export const moderacionController = {
 
       const moderacionImagenService = new ModeracionImagenService();
       
-      const resultado = await moderacionImagenService.moderarImagen(
-        file.path,
+      // ✅ USAR MÉTODO DESDE BUFFER PARA CLOUDINARY
+      const fileBuffer = await fs.readFile(file.path);
+      const resultado = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        file.filename,
         ipUsuario,
         hashNavegador
       );
+
+      // ✅ LIMPIAR ARCHIVO TEMPORAL
+      await fs.unlink(file.path).catch(console.error);
 
       // Respuesta detallada para análisis
       res.json({
@@ -37,6 +44,7 @@ export const moderacionController = {
         puntuacionRiesgo: resultado.puntuacionRiesgo,
         motivoRechazo: resultado.motivoRechazo,
         detalles: resultado.detalles,
+        cloudinaryUrl: resultado.cloudinaryUrl, // 🆕 NUEVO
         imagen: {
           nombre: file.filename,
           tamaño: file.size,
@@ -47,6 +55,11 @@ export const moderacionController = {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error('❌ Error analizando imagen:', errorMessage);
+      
+      // Limpiar archivo en caso de error
+      if (req.file) {
+        await fs.unlink(req.file.path).catch(console.error);
+      }
       
       res.status(500).json({
         success: false,
@@ -227,8 +240,8 @@ export const moderacionController = {
     }
   },
 
-  /**
-   * Validar imagen antes de subir (endpoint separado)
+ /**
+   * ✅ CORREGIDO: Validar imagen antes de subir (compatible con Cloudinary)
    */
   async validarImagenPrev(req: Request, res: Response) {
     try {
@@ -253,16 +266,19 @@ export const moderacionController = {
 
       const moderacionImagenService = new ModeracionImagenService();
       
-      const resultado = await moderacionImagenService.moderarImagen(
-        file.path,
+      // ✅ USAR MÉTODO DESDE BUFFER
+      const fileBuffer = await fs.readFile(file.path);
+      const resultado = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        file.filename,
         ipUsuario,
         hashNavegador
       );
 
-      if (!resultado.esAprobado) {
-        // Eliminar archivo si fue rechazado
-        await fs.unlink(file.path).catch(console.error);
-        
+      // ✅ LIMPIAR ARCHIVO TEMPORAL SIEMPRE
+      await fs.unlink(file.path).catch(console.error);
+
+      if (!resultado.esAprobado) {        
         return res.status(400).json({
           success: false,
           error: 'IMAGEN_RECHAZADA',
@@ -282,17 +298,18 @@ export const moderacionController = {
         });
       }
 
-      // Imagen aprobada
+      // ✅ IMAGEN APROBADA - DEVOLVER URL DE CLOUDINARY
       res.json({
         success: true,
         esAprobado: true,
         mensaje: 'Imagen aprobada, puedes continuar con el proceso',
         puntuacionRiesgo: resultado.puntuacionRiesgo,
+        cloudinaryUrl: resultado.cloudinaryUrl, // 🆕 URL para usar en frontend
+        publicId: resultado.publicId, // 🆕 ID para referencias futuras
         imagen: {
           nombre: file.filename,
           tamaño: file.size,
-          tipo: file.mimetype,
-          rutaTemporal: file.path
+          tipo: file.mimetype
         },
         detalles: resultado.detalles
       });
@@ -313,6 +330,7 @@ export const moderacionController = {
       });
     }
   },
+
 
   /**
    * NUEVO: Obtener estadísticas usando la vista

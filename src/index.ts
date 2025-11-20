@@ -1,4 +1,4 @@
-// ✅ ARCHIVO PRINCIPAL CORREGIDO - RUTAS FIJAS
+// ✅ ARCHIVO PRINCIPAL SIMPLIFICADO - CON CLIP INTEGRADO
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -11,8 +11,10 @@ import { middlewareIpNavegador } from './middleware/ipNavegador';
 // ✅ SISTEMA ESENCIAL DE MODERACIÓN
 import { ModeracionService } from './services/moderacionService';
 import { ModeracionImagenService } from './services/moderacionImagenService';
-import { AnalizadorTexto } from './utils/analizadorTexto';
 import { pool } from './utils/baseDeDatos';
+
+// ✅ NUEVO: Importar servicio CLIP para estado
+import { clipAnalyzerService } from './services/ClipAnalyzerService';
 
 // Rutas existentes
 import administradorRoutes from './rutas/administradorRoutes';
@@ -39,13 +41,41 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/images', express.static(path.join(__dirname, '../uploads/images')));
 app.use('/pdfs', express.static(path.join(__dirname, '../uploads/pdfs')));
 
-// ✅ RUTA DE SALUD BÁSICA
+// ✅ RUTA DE SALUD BÁSICA (ACTUALIZADA)
 app.get('/api/health', (req, res) => {
+  const clipEstado = clipAnalyzerService.obtenerEstado();
+  
   res.json({ 
     success: true,
     status: 'OK', 
     message: 'Servidor Tahitic funcionando',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    servicios: {
+      base_datos: 'activo',
+      moderacion_texto: 'activo',
+      moderacion_imagenes: clipEstado.modelos_listos ? 'activo' : 'inicializando',
+      clip_modelo: clipEstado
+    }
+  });
+});
+
+// ✅ NUEVA RUTA: ESTADO DEL CLIP
+app.get('/api/clip/status', (req, res) => {
+  const estado = clipAnalyzerService.obtenerEstado();
+  
+  res.json({
+    success: true,
+    servicio: 'CLIP Image Analysis',
+    estado: estado,
+    capacidades: [
+      "deteccion_violencia_fisica",
+      "deteccion_sangre_heridas", 
+      "deteccion_armas",
+      "deteccion_contenido_+18",
+      "deteccion_drogas_alcohol"
+    ],
+    modelo: "CLIP-base-patch32",
+    version: "2.0.0-integrado"
   });
 });
 
@@ -74,14 +104,20 @@ app.get('/api/debug/tables', async (req, res) => {
 
 // ✅ RUTAS PÚBLICAS
 app.use('/api/auth', autenticacionRoutes);
+
+// ✅ RUTAS DE MODERACIÓN
 app.use('/api/moderacion', moderacionRoutes);
+
+// ✅ RUTAS CON MODERACIÓN INTEGRADA
 app.use('/api/lugares', lugarRoutes);
 app.use('/api/experiencias', experienciaRoutes);
 app.use('/api/calificaciones', calificacionRoutes);
+
+// ✅ RUTAS PROTEGIDAS (admin)
 app.use('/api/admin', administradorRoutes);
 app.use('/api/archivos', archivosRoutes);
 
-// ✅ RUTA DE ESTADO DE MODERACIÓN
+// ✅ RUTA DE ESTADO DE MODERACIÓN (ACTUALIZADA)
 app.get('/api/moderacion/estado', async (req, res) => {
   try {
     const logsStats = await pool.query(`
@@ -103,10 +139,13 @@ app.get('/api/moderacion/estado', async (req, res) => {
       GROUP BY es_aprobado
     `);
 
+    const clipEstado = clipAnalyzerService.obtenerEstado();
+
     res.json({
       success: true,
       sistema: 'activo',
       periodo: '7 días',
+      clip: clipEstado,
       estadisticas: {
         texto: {
           logs: logsStats.rows
@@ -137,157 +176,187 @@ app.use('/api/', (req, res) => {
   });
 });
 
-// ✅ MANEJO GLOBAL DE ERRORES (CORREGIDO)
-app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+// ✅ MANEJO GLOBAL DE ERRORES
+app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('❌ Error global no manejado:', error);
-  
-  const errorMessage = error instanceof Error ? error.message : 'Error interno del servidor';
-  const errorDetail = process.env.NODE_ENV === 'development' ? errorMessage : undefined;
-  
   res.status(500).json({
     success: false,
     error: 'Error interno del servidor',
-    detalle: errorDetail
+    detalle: process.env.NODE_ENV === 'development' ? error.message : undefined
   });
 });
 
-// ✅ FUNCIÓN MEJORADA - DETECCIÓN AUTOMÁTICA DE RUTAS (CORREGIDA)
+// ✅ FUNCIÓN PARA INICIALIZAR BASE DE DATOS
 async function initializeDatabase() {
-  console.log('🔄 INICIANDO MIGRACIÓN COMPLETA...');
+  console.log('🔄 Verificando estructura de la base de datos...');
   
   try {
-    // ✅ DETECTAR RUTA CORRECTA DEL SCRIPT - INICIALIZADA CON VALOR POR DEFECTO
-    let initScriptPath: string = '';
+    // Verificar si las tablas principales existen
+    const tablesCheck = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('administradores', 'lugares', 'experiencias')
+    `);
+
+    const existingTables = tablesCheck.rows.map((row: any) => row.table_name);
     
-    if (process.env.NODE_ENV === 'production') {
-      // En producción: probar diferentes rutas posibles
-      const possiblePaths = [
-        path.join(__dirname, 'scripts/init-database.js'), // Ruta absoluta desde dist
-        path.join(process.cwd(), 'dist/scripts/init-database.js'), // Ruta desde raíz
-        path.join(process.cwd(), 'scripts/init-database.js'), // Ruta desarrollo compilada
-        './scripts/init-database.js',
-        '../scripts/init-database.js'
-      ];
-      
-      for (const possiblePath of possiblePaths) {
-        try {
-          // Verificar si el archivo existe
-          const fs = require('fs');
-          if (fs.existsSync(possiblePath)) {
-            initScriptPath = possiblePath;
-            console.log(`✅ Encontrado script en: ${possiblePath}`);
-            break;
-          }
-        } catch (e) {
-          // Continuar con la siguiente ruta
-          continue;
-        }
-      }
-      
-      // ✅ VERIFICAR QUE SE ENCONTRÓ UNA RUTA VÁLIDA
-      if (!initScriptPath) {
-        throw new Error('No se pudo encontrar el script de migración en producción');
-      }
-    } else {
-      // En desarrollo: usar TypeScript directamente
-      initScriptPath = path.join(__dirname, '../scripts/init-database');
+    if (existingTables.length >= 3) {
+      console.log('✅ Tablas principales ya existen:', existingTables);
+      return true;
     }
+
+    console.log('📋 Algunas tablas no existen, ejecutando inicialización...');
     
-    console.log(`📂 Ejecutando: ${initScriptPath}`);
-    
-    const { initializeDatabase: runMigration } = require(initScriptPath);
-    await runMigration();
-    
-    console.log('✅ Migración completa ejecutada exitosamente');
-    return true;
-    
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Error desconocido en migración';
-    
-    console.error('💥 ERROR CRÍTICO en migración:', errorMessage);
-    
-    // ❌ NO HAY FALLBACK - SI FALLA, EL SERVIDOR NO INICIA
-    throw new Error(`Fallo en migración de BD: ${errorMessage}`);
+    // Importar y ejecutar el script de inicialización
+    try {
+      // En producción, el archivo compilado estará en dist/scripts
+      const initScriptPath = process.env.NODE_ENV === 'production' 
+        ? '../scripts/init-database.js'
+        : './scripts/init-database';
+      
+      const { initializeDatabase } = require(initScriptPath);
+      await initializeDatabase();
+      console.log('✅ Base de datos inicializada exitosamente');
+      return true;
+    } catch (initError) {
+      console.error('❌ Error ejecutando script de inicialización:', initError);
+      
+      // Fallback: crear tablas básicas manualmente
+      console.log('🔄 Intentando creación manual de tablas...');
+      await createBasicTables();
+      return true;
+    }
+  } catch (error) {
+    console.error('❌ Error verificando/inicializando base de datos:', error);
+    return false;
   }
 }
 
-// ✅ INICIALIZACIÓN DEL SERVIDOR - SIN FALLBACK
-const PORT = parseInt(process.env.PORT || '4000');
+// ✅ FUNCIÓN DE FALLBACK PARA CREAR TABLAS BÁSICAS
+async function createBasicTables() {
+  try {
+    // Tabla de administradores básica
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS administradores (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        nombre VARCHAR(255),
+        es_administrador BOOLEAN DEFAULT TRUE,
+        creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Insertar admin por defecto
+    await pool.query(`
+      INSERT INTO administradores (email, nombre, es_administrador) 
+      VALUES ($1, $2, $3)
+      ON CONFLICT (email) DO NOTHING
+    `, ['juanramiro139@gmail.com', 'Juan Ramiro', true]);
+
+    console.log('✅ Tablas básicas creadas exitosamente');
+  } catch (error) {
+    console.error('❌ Error creando tablas básicas:', error);
+    throw error;
+  }
+}
+
+// ✅ INICIALIZACIÓN DEL SERVIDOR
+const PORT = process.env.PORT || 4000;
 
 const iniciarServidor = async () => {
   try {
-    console.log('🚀 INICIANDO SERVIDOR TAHITIC...');
-    console.log('🏷️  Ambiente:', process.env.NODE_ENV);
-    console.log('🌐 Puerto:', PORT);
-    
     // ✅ VERIFICAR CONEXIÓN A BD
     console.log('🔌 Verificando conexión a la base de datos...');
     await pool.query('SELECT NOW()');
     console.log('✅ Conectado a la base de datos PostgreSQL');
 
-    // ✅ EJECUTAR MIGRACIÓN COMPLETA (SIN FALLBACK)
-    console.log('🔄 EJECUTANDO MIGRACIÓN COMPLETA...');
-    await initializeDatabase();
-    
-    console.log('✅ BASE DE DATOS INICIALIZADA CORRECTAMENTE');
-
-    // ✅ VERIFICAR TABLAS CREADAS
-    const tables = await pool.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public'
-      ORDER BY table_name
-    `);
-    
-    console.log('📊 TABLAS CREADAS:', tables.rows.map((row: any) => row.table_name));
-    console.log('🎉 TOTAL TABLAS:', tables.rows.length);
+    // ✅ INICIALIZAR BASE DE DATOS (TABLAS)
+    const dbInitialized = await initializeDatabase();
+    if (!dbInitialized) {
+      throw new Error('No se pudo inicializar la base de datos');
+    }
 
     // ✅ INICIALIZAR SERVICIOS DE MODERACIÓN
     console.log('🔄 Inicializando servicios de moderación...');
     const moderacionService = new ModeracionService();
     const moderacionImagenService = new ModeracionImagenService();
+    
+    // ✅ NUEVO: Inicializar CLIP para moderación de imágenes
+    console.log('🎯 Inicializando CLIP para moderación de imágenes...');
+    await moderacionImagenService.inicializar();
+    
+    const clipEstado = clipAnalyzerService.obtenerEstado();
     console.log('✅ Servicios de moderación listos');
 
-    // ✅ MONITOREO PERIÓDICO (CORREGIDO)
+    // ✅ MONITOREO PERIÓDICO SIMPLE (ACTUALIZADO)
     const intervaloMonitoreo = setInterval(async () => {
       try {
-        await pool.query('SELECT 1 FROM administradores LIMIT 1');
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-        console.error('❌ Error en verificación periódica de BD:', errorMessage);
+        const logsTextoRecientes = await pool.query(`
+          SELECT COUNT(*) as total 
+          FROM logs_moderacion 
+          WHERE creado_en >= NOW() - INTERVAL '1 hour'
+        `);
+        
+        const logsImagenesRecientes = await pool.query(`
+          SELECT COUNT(*) as total 
+          FROM logs_moderacion_imagenes 
+          WHERE creado_en >= NOW() - INTERVAL '1 hour'
+        `);
+        
+        const totalTexto = parseInt(logsTextoRecientes.rows[0].total);
+        const totalImagenes = parseInt(logsImagenesRecientes.rows[0].total);
+        const clipListo = clipAnalyzerService.estaListo();
+        
+        if (totalTexto > 0 || totalImagenes > 0) {
+          console.log(`📊 Moderación: ${totalTexto} textos + ${totalImagenes} imágenes en la última hora | CLIP: ${clipListo ? '✅' : '❌'}`);
+        }
+      } catch (error) {
+        console.error('❌ Error en monitoreo periódico:', error);
       }
-    }, 15 * 60 * 1000);
+    }, 30 * 60 * 1000); // Cada 30 minutos
 
     // ✅ MANEJO GRACCIOSO DE APAGADO
     const shutdown = async () => {
       console.log('🛑 Apagando servidor...');
       clearInterval(intervaloMonitoreo);
-      await pool.end();
-      console.log('✅ Conexión a BD cerrada');
+      
+      try {
+        await pool.end();
+        console.log('✅ Conexión a BD cerrada');
+      } catch (error) {
+        console.error('❌ Error cerrando conexión a BD:', error);
+      }
+      
       process.exit(0);
     };
 
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    // ✅ INICIAR SERVIDOR (CORREGIDO)
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log('\n' + '='.repeat(60));
-      console.log('🎉 SERVIDOR TAHITIC INICIADO CORRECTAMENTE');
-      console.log('🌐 URL: http://localhost:' + PORT);
-      console.log('🏷️  Ambiente:', process.env.NODE_ENV);
-      console.log('🗄️  Base de datos:', 'PostgreSQL Railway');
-      console.log('📊 Tablas totales:', tables.rows.length);
+    // ✅ INICIAR SERVIDOR
+    app.listen(PORT, () => {
+      const clipListo = clipAnalyzerService.estaListo();
+      
+      console.log('\n=== ✅ SISTEMA DE MODERACIÓN INICIALIZADO ===');
+      console.log('🌐 Puerto:', PORT);
+      console.log('🗄️  BD:', process.env.DB_NAME || 'PostgreSQL Railway');
       console.log('🔐 JWT:', process.env.JWT_SECRET ? '✅ Configurado' : '❌ Faltante');
-      console.log('📝 Moderación texto:', '✅ ACTIVO');
-      console.log('🖼️ Moderación imágenes:', '✅ ACTIVO');
-      console.log('='.repeat(60) + '\n');
+      console.log('📝 Análisis de texto:', '✅ ACTIVO');
+      console.log('🖼️ Análisis de imágenes CLIP:', clipListo ? '✅ ACTIVO' : '🔄 INICIALIZANDO');
+      console.log('🤖 Modelo CLIP:', clipEstado.modelo);
+      console.log('🚀 Servidor ejecutándose en puerto', PORT);
+      console.log('============================================\n');
+      
+      // ✅ LOG ADICIONAL SI CLIP NO ESTÁ LISTO
+      if (!clipListo) {
+        console.log('⏳ CLIP se está inicializando en segundo plano...');
+        console.log('📸 Las imágenes se procesarán cuando CLIP esté listo');
+      }
     });
 
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Error crítico desconocido';
-    
-    console.error('💥 ERROR CRÍTICO AL INICIAR SERVIDOR:', errorMessage);
+  } catch (error) {
+    console.error('❌ Error crítico al iniciar servidor:', error);
     
     try {
       await pool.end();

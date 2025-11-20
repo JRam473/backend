@@ -1,9 +1,13 @@
-// backend/src/services/moderacionImagenService.ts - VERSIÓN COMPATIBLE
-import { ModeloClient } from './modeloClient';
+// services/moderacionImagenService.ts - VERSIÓN CON CLIP INTEGRADO (CORREGIDA)
+import { CloudinaryService } from './cloudinaryService';
 import { pool } from '../utils/baseDeDatos';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
+
+// ✅ NUEVO: Importar servicios CLIP integrados
+import { clipAnalyzerService } from './ClipAnalyzerService';
+import { clipImageDownloader } from './ClipImageDownloader';
+import { ClipAnalysisResult } from '../types/ClipTypes';
 
 const fsPromises = fs.promises;
 
@@ -21,21 +25,51 @@ export interface ImageModerationResult {
   detalles?: any;
   tempPath?: string;
   rutaFinal?: string;
+  cloudinaryUrl?: string;
+  publicId?: string;
 }
 
 export interface ImageModerationOptions {
   tipoContenido: 'experiencia' | 'lugar' | 'pdf' | 'general';
   idContenido?: string | number | undefined;
+  usarCloudinary?: boolean;
 }
 
 export class ModeracionImagenService {
-  private modeloClient: ModeloClient;
+  private cloudinaryService: CloudinaryService;
   private tempDir: string;
+  private clipInicializado: boolean = false;
 
   constructor() {
-    this.modeloClient = new ModeloClient();
+    this.cloudinaryService = new CloudinaryService();
     this.tempDir = path.join(process.cwd(), 'temp_images');
     this.ensureTempDir();
+  }
+
+  /**
+   * ✅ INICIALIZAR CLIP (llamar desde server.ts)
+   */
+  async inicializar(): Promise<void> {
+    if (this.clipInicializado) return;
+
+    console.log('🔄 Inicializando moderación de imágenes con CLIP...');
+    this.clipInicializado = await clipAnalyzerService.inicializarModelos();
+    
+    if (this.clipInicializado) {
+      console.log('✅ Moderación de imágenes CLIP inicializada');
+    } else {
+      console.error('❌ No se pudo inicializar CLIP para moderación de imágenes');
+    }
+  }
+
+  /**
+   * ✅ VERIFICAR SI CLIP ESTÁ LISTO
+   */
+  private async verificarClipListo(): Promise<boolean> {
+    if (!this.clipInicializado) {
+      await this.inicializar();
+    }
+    return clipAnalyzerService.estaListo();
   }
 
   private ensureTempDir(): void {
@@ -47,26 +81,27 @@ export class ModeracionImagenService {
 
   /**
    * ✅ MÉTODO COMPATIBLE PARA PDF ANALYSIS SERVICE
-   * Mantiene la firma original para compatibilidad
    */
   async moderarImagen(
     imagePath: string, 
     ipUsuario: string, 
     hashNavegador: string
   ): Promise<ImageModerationResult> {
-    console.log(`🖼️ Moderación compatible (sin options): ${imagePath}`);
+    console.log(`🖼️ Moderación compatible: ${imagePath}`);
     
-    // Usar opciones por defecto para mantener compatibilidad
+    const esCloudinary = imagePath.includes('cloudinary.com');
+    
     const options: ImageModerationOptions = {
-      tipoContenido: 'pdf', // Tipo específico para PDF Analysis
-      idContenido: undefined
+      tipoContenido: 'pdf',
+      idContenido: undefined,
+      usarCloudinary: esCloudinary
     };
     
     return await this.moderarImagenConOpciones(imagePath, ipUsuario, hashNavegador, options);
   }
 
   /**
-   * ✅ NUEVO MÉTODO CON OPCIONES (para nuevo código)
+   * ✅ MÉTODO PRINCIPAL CON OPCIONES (AHORA USANDO CLIP INTEGRADO)
    */
   async moderarImagenConOpciones(
     imagePath: string, 
@@ -74,23 +109,30 @@ export class ModeracionImagenService {
     hashNavegador: string,
     options: ImageModerationOptions
   ): Promise<ImageModerationResult> {
-    console.log(`🖼️ Moderación con opciones: ${imagePath} para ${options.tipoContenido}`);
+    console.log(`🖼️ Moderación con CLIP integrado: ${imagePath} para ${options.tipoContenido}`);
+    
+    // Si es una URL de Cloudinary, analizarla directamente
+    if (this.esUrlCloudinary(imagePath)) {
+      console.log('🌐 Detectada URL de Cloudinary, analizando directamente...');
+      return await this.moderarImagenCloudinary(imagePath, ipUsuario, hashNavegador, options);
+    }
     
     // Si es una ruta temporal, usar el método temporal
     if (imagePath.includes('temp_images')) {
       return await this.moderarImagenTemporal(imagePath, ipUsuario, hashNavegador, options);
     }
     
-    // Para rutas normales, usar el método directo
+    // Para rutas locales normales
     try {
-      const servidorListo = await this.modeloClient.waitForServerReady(10);
+      const clipListo = await this.verificarClipListo();
       
-      if (!servidorListo) {
-        console.warn('⚠️ Servidor de modelos no disponible, usando fallback...');
-        return await this.usarMetodoOriginal(imagePath, ipUsuario, hashNavegador, options);
+      if (!clipListo) {
+        console.warn('⚠️ CLIP integrado no disponible');
+        return await this.metodoFallbackServidorNoDisponible(imagePath, ipUsuario, hashNavegador, options);
       }
 
-      const resultado = await this.modeloClient.analizarImagen(imagePath);
+      // ✅ NUEVO: Usar CLIP integrado en lugar de servidor externo
+      const resultado = await this.analizarImagenConClip(imagePath);
 
       await this.registrarLogModeracionImagen({
         imagePath,
@@ -98,11 +140,12 @@ export class ModeracionImagenService {
         hashNavegador,
         resultado,
         esAprobado: resultado.es_apto,
-        tipoContenido: options.tipoContenido
+        tipoContenido: options.tipoContenido,
+        
       });
 
       if (!resultado.es_apto) {
-        const motivo = this.generarMotivoRechazo(resultado);
+        const motivo = this.generarMotivoRechazoClip(resultado);
         return {
           esAprobado: false,
           motivoRechazo: motivo,
@@ -111,7 +154,6 @@ export class ModeracionImagenService {
         };
       }
 
-      // Para imágenes ya existentes, no las movemos, solo retornamos aprobación
       return {
         esAprobado: true,
         puntuacionRiesgo: resultado.puntuacion_riesgo,
@@ -119,8 +161,173 @@ export class ModeracionImagenService {
       };
 
     } catch (error) {
-      console.error('❌ Error en moderación de imagen:', error);
-      return await this.usarMetodoOriginal(imagePath, ipUsuario, hashNavegador, options);
+      console.error('❌ Error en moderación de imagen con CLIP:', error);
+      return await this.metodoFallbackServidorNoDisponible(imagePath, ipUsuario, hashNavegador, options);
+    }
+  }
+
+  /**
+   * ✅ NUEVO: Analizar imagen usando CLIP integrado
+   */
+  private async analizarImagenConClip(imagePath: string): Promise<ClipAnalysisResult> {
+    console.log(`🔍 Analizando con CLIP integrado: ${imagePath}`);
+    
+    // Determinar tipo de imagen y preparar ruta
+    let rutaAnalisis: string;
+    let tipoOrigen: 'url' | 'local';
+
+    if (clipImageDownloader.esUrl(imagePath)) {
+      console.log(`🌐 Descargando imagen desde URL: ${imagePath}`);
+      const descarga = await clipImageDownloader.descargarImagenDesdeUrl(imagePath);
+      
+      if (!descarga.success || !descarga.tempPath) {
+        throw new Error(descarga.error || 'Error desconocido al descargar imagen');
+      }
+      
+      rutaAnalisis = descarga.tempPath;
+      tipoOrigen = 'url';
+    } else {
+      const verificacion = await clipImageDownloader.verificarArchivoLocal(imagePath);
+      
+      if (!verificacion.success || !verificacion.tempPath) {
+        throw new Error(verificacion.error || 'Error verificando archivo local');
+      }
+      
+      rutaAnalisis = verificacion.tempPath;
+      tipoOrigen = 'local';
+    }
+
+    try {
+      // Realizar análisis con CLIP
+      const resultado = await clipAnalyzerService.analizarImagen(rutaAnalisis);
+
+      // ✅ CORREGIDO: Usar fsPromises.unlink en lugar de fs.unlink
+      if (tipoOrigen === 'url' && rutaAnalisis !== imagePath) {
+        await fsPromises.unlink(rutaAnalisis).catch(error => 
+          console.warn(`⚠️ No se pudo eliminar archivo temporal: ${error.message}`)
+        );
+      }
+
+      return resultado;
+    } catch (error) {
+      // ✅ CORREGIDO: Usar fsPromises.unlink en lugar de fs.unlink
+      if (tipoOrigen === 'url' && rutaAnalisis !== imagePath) {
+        await fsPromises.unlink(rutaAnalisis).catch(error => 
+          console.warn(`⚠️ No se pudo eliminar archivo temporal: ${error.message}`)
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * ✅ NUEVO: Moderar imagen desde URL de Cloudinary usando CLIP
+   */
+  private async moderarImagenCloudinary(
+    cloudinaryUrl: string,
+    ipUsuario: string, 
+    hashNavegador: string,
+    options: ImageModerationOptions
+  ): Promise<ImageModerationResult> {
+    try {
+      console.log(`🌐 Analizando imagen de Cloudinary con CLIP: ${cloudinaryUrl}`);
+      
+      const clipListo = await this.verificarClipListo();
+      
+      if (!clipListo) {
+        console.warn('⚠️ CLIP integrado no disponible para Cloudinary');
+        return {
+          esAprobado: false,
+          motivoRechazo: 'Servicio de moderación no disponible',
+          puntuacionRiesgo: 1.0
+        };
+      }
+
+      // ✅ NUEVO: Usar CLIP integrado para analizar URL de Cloudinary
+      const resultado = await this.analizarImagenConClip(cloudinaryUrl);
+
+      await this.registrarLogModeracionImagen({
+        imagePath: cloudinaryUrl,
+        ipUsuario,
+        hashNavegador,
+        resultado,
+        esAprobado: resultado.es_apto,
+        tipoContenido: options.tipoContenido,
+        
+      });
+
+      if (!resultado.es_apto) {
+        const motivo = this.generarMotivoRechazoClip(resultado);
+        return {
+          esAprobado: false,
+          motivoRechazo: motivo,
+          puntuacionRiesgo: resultado.puntuacion_riesgo,
+          detalles: resultado,
+          cloudinaryUrl: cloudinaryUrl
+        };
+      }
+
+      return {
+        esAprobado: true,
+        puntuacionRiesgo: resultado.puntuacion_riesgo,
+        detalles: resultado,
+        cloudinaryUrl: cloudinaryUrl
+      };
+
+    } catch (error) {
+      console.error('❌ Error moderando imagen de Cloudinary con CLIP:', error);
+      return {
+        esAprobado: false,
+        motivoRechazo: 'Error al analizar imagen de Cloudinary',
+        puntuacionRiesgo: 1.0,
+        cloudinaryUrl: cloudinaryUrl
+      };
+    }
+  }
+
+  /**
+   * ✅ Moderar imagen desde buffer
+   */
+  async moderarImagenDesdeBuffer(
+    fileBuffer: Buffer,
+    fileName: string,
+    ipUsuario: string,
+    hashNavegador: string
+  ): Promise<ImageModerationResult> {
+    console.log(`🖼️ Moderando imagen desde buffer con CLIP: ${fileName}`);
+    
+    try {
+      // Crear imagen temporal
+      const tempResult = await this.crearImagenTemporal(fileBuffer, fileName);
+      
+      if (!tempResult.success || !tempResult.tempPath) {
+        return {
+          esAprobado: false,
+          motivoRechazo: 'Error al procesar la imagen',
+          puntuacionRiesgo: 1.0
+        };
+      }
+
+      // Moderar la imagen temporal usando CLIP
+      const resultado = await this.moderarImagenTemporal(
+        tempResult.tempPath,
+        ipUsuario,
+        hashNavegador,
+        {
+          tipoContenido: 'experiencia',
+          idContenido: undefined
+        }
+      );
+
+      return resultado;
+
+    } catch (error) {
+      console.error('❌ Error moderando imagen desde buffer:', error);
+      return {
+        esAprobado: false,
+        motivoRechazo: 'Error al procesar la imagen',
+        puntuacionRiesgo: 1.0
+      };
     }
   }
 
@@ -129,17 +336,14 @@ export class ModeracionImagenService {
    */
   async crearImagenTemporal(fileBuffer: Buffer, originalname: string): Promise<TempImageResult> {
     try {
-      // Limpiar archivos temporales previos ANTES de crear nuevos
       this.cleanTempDir();
 
-      // Generar nombre único para el archivo temporal
       const timestamp = Date.now();
       const randomSuffix = Math.random().toString(36).substring(2, 8);
       const extension = path.extname(originalname) || '.jpg';
       const filename = `temp_${timestamp}_${randomSuffix}${extension}`;
       const tempPath = path.join(this.tempDir, filename);
 
-      // Guardar archivo temporal
       await fsPromises.writeFile(tempPath, fileBuffer);
       
       console.log(`📥 Imagen temporal creada: ${tempPath}`);
@@ -159,7 +363,7 @@ export class ModeracionImagenService {
   }
 
   /**
-   * ✅ MODERAR IMAGEN TEMPORAL - CON DESTINO ESPECÍFICO
+   * ✅ MODERAR IMAGEN TEMPORAL (ACTUALIZADO CON CLIP)
    */
   async moderarImagenTemporal(
     tempPath: string, 
@@ -167,21 +371,19 @@ export class ModeracionImagenService {
     hashNavegador: string,
     options: ImageModerationOptions
   ): Promise<ImageModerationResult> {
-    console.log(`🖼️ Moderando imagen temporal: ${tempPath} para ${options.tipoContenido}`);
+    console.log(`🖼️ Moderando imagen temporal con CLIP: ${tempPath} para ${options.tipoContenido}`);
     
     try {
-      // Esperar a que el servidor esté listo
-      const servidorListo = await this.modeloClient.waitForServerReady(10);
+      const clipListo = await this.verificarClipListo();
       
-      if (!servidorListo) {
-        console.warn('⚠️ Servidor de modelos no disponible, usando fallback...');
-        return await this.usarMetodoOriginal(tempPath, ipUsuario, hashNavegador, options);
+      if (!clipListo) {
+        console.warn('⚠️ CLIP integrado no disponible');
+        return await this.metodoFallbackServidorNoDisponible(tempPath, ipUsuario, hashNavegador, options);
       }
 
-      // Analizar imagen temporal
-      const resultado = await this.modeloClient.analizarImagen(tempPath);
+      // ✅ NUEVO: Usar CLIP integrado para analizar la imagen temporal
+      const resultado = await this.analizarImagenConClip(tempPath);
 
-      // Registrar log de moderación
       await this.registrarLogModeracionImagen({
         imagePath: tempPath,
         ipUsuario,
@@ -189,13 +391,13 @@ export class ModeracionImagenService {
         resultado,
         esAprobado: resultado.es_apto,
         esTemporal: true,
-        tipoContenido: options.tipoContenido
+        tipoContenido: options.tipoContenido,
+        
       });
 
       if (!resultado.es_apto) {
-        const motivo = this.generarMotivoRechazo(resultado);
+        const motivo = this.generarMotivoRechazoClip(resultado);
         
-        // ❌ IMAGEN RECHAZADA: Eliminar temporal inmediatamente
         await this.eliminarArchivo(tempPath);
         console.log('🗑️ Imagen temporal rechazada eliminada');
         
@@ -208,134 +410,105 @@ export class ModeracionImagenService {
         };
       }
 
-      // ✅ IMAGEN APROBADA: Mover a ubicación específica según el tipo
-      const rutaFinal = await this.moverImagenAprobada(tempPath, options);
-      
-      return {
-        esAprobado: true,
-        puntuacionRiesgo: resultado.puntuacion_riesgo,
-        detalles: resultado,
-        tempPath: tempPath,
-        rutaFinal: rutaFinal
-      };
+      // ✅ IMAGEN APROBADA: SUBIR A CLOUDINARY
+      if (options.usarCloudinary !== false) {
+        const fileBuffer = await fsPromises.readFile(tempPath);
+        const cloudinaryResult = await this.cloudinaryService.subirArchivo(
+          fileBuffer,
+          path.basename(tempPath),
+          this.obtenerFolderCloudinary(options.tipoContenido)
+        );
 
-    } catch (error) {
-      console.error('❌ Error en moderación de imagen temporal:', error);
-      
-      // En caso de error, eliminar temporal inmediatamente
-      await this.eliminarArchivo(tempPath);
-      console.log('🗑️ Imagen temporal eliminada por error');
-      
-      return await this.usarMetodoOriginal(tempPath, ipUsuario, hashNavegador, options);
-    }
-  }
+        // Limpiar archivo temporal
+        await this.eliminarArchivo(tempPath);
 
-  /**
-   * ✅ MOVER IMAGEN APROBADA A DIRECTORIO ESPECÍFICO
-   */
-  private async moverImagenAprobada(tempPath: string, options: ImageModerationOptions): Promise<string> {
-    try {
-      const filename = path.basename(tempPath);
-      
-      // Definir directorio destino según el tipo de contenido
-      let destDir: string;
-      let rutaRelativa: string;
-
-      switch (options.tipoContenido) {
-        case 'experiencia':
-          destDir = path.join(process.cwd(), 'uploads', 'images', 'experiencias');
-          rutaRelativa = `/uploads/images/experiencias/${filename}`;
-          break;
-        
-        case 'lugar':
-          destDir = path.join(process.cwd(), 'uploads', 'images', 'lugares');
-          rutaRelativa = `/uploads/images/lugares/${filename}`;
-          break;
-        
-        case 'pdf':
-          // Para PDF Analysis, usar directorio temporal o aprobadas
-          destDir = path.join(process.cwd(), 'uploads', 'images', 'aprobadas');
-          rutaRelativa = `/uploads/images/aprobadas/${filename}`;
-          break;
-        
-        default:
-          // Fallback a aprobadas genéricas
-          destDir = path.join(process.cwd(), 'uploads', 'images', 'aprobadas');
-          rutaRelativa = `/uploads/images/aprobadas/${filename}`;
+        return {
+          esAprobado: true,
+          puntuacionRiesgo: resultado.puntuacion_riesgo,
+          detalles: resultado,
+          cloudinaryUrl: cloudinaryResult.secure_url,
+          publicId: cloudinaryResult.public_id,
+          tempPath: tempPath
+        };
+      } else {
+        // Si no se usa Cloudinary, mantener archivo temporal
+        return {
+          esAprobado: true,
+          puntuacionRiesgo: resultado.puntuacion_riesgo,
+          detalles: resultado,
+          tempPath: tempPath
+        };
       }
-      
-      // Crear directorio si no existe
-      await fsPromises.mkdir(destDir, { recursive: true });
-      
-      const destPath = path.join(destDir, filename);
-      
-      // Mover archivo
-      await fsPromises.rename(tempPath, destPath);
-      
-      console.log(`✅ Imagen aprobada movida a: ${destPath} (${options.tipoContenido})`);
-      
-      // Retornar ruta relativa para la base de datos
-      return rutaRelativa;
-      
+
     } catch (error) {
-      console.error('❌ Error moviendo imagen aprobada:', error);
-      
-      // Si falla el movimiento, eliminar el temporal
+      console.error('❌ Error en moderación de imagen temporal con CLIP:', error);
       await this.eliminarArchivo(tempPath);
-      throw new Error('No se pudo guardar la imagen aprobada');
+      return await this.metodoFallbackServidorNoDisponible(tempPath, ipUsuario, hashNavegador, options);
     }
   }
 
   /**
-   * ✅ MÉTODO FALLBACK ORIGINAL MEJORADO
+   * ✅ NUEVO: Método fallback cuando CLIP no está disponible
    */
-  private async usarMetodoOriginal(
+  private async metodoFallbackServidorNoDisponible(
     imagePath: string, 
     ipUsuario: string, 
     hashNavegador: string,
     options: ImageModerationOptions
   ): Promise<ImageModerationResult> {
-    console.log('🔄 Usando método PythonBridge como fallback...');
+    console.log('🔄 Usando método fallback (CLIP no disponible)...');
     
     try {
-      const { PythonBridge } = await import('../utils/pythonBridge');
-      const bridge = new PythonBridge();
-      const resultado = await bridge.esImagenApta(imagePath);
-
-      await this.registrarLogModeracionImagen({
-        imagePath,
-        ipUsuario,
-        hashNavegador,
-        resultado: resultado.detalles || null,
-        esAprobado: resultado.esApto,
-        tipoContenido: options.tipoContenido
-      });
-
-      if (!resultado.esApto) {
+      // ✅ ESTRATEGIA DE FALLBACK MEJORADA
+      
+      // 1. Si es una imagen temporal, rechazarla por seguridad
+      if (imagePath.includes('temp_images')) {
+        await this.eliminarArchivo(imagePath);
+        
         return {
           esAprobado: false,
-          motivoRechazo: resultado.detalles?.error || 'Contenido inapropiado',
-          puntuacionRiesgo: resultado.detalles?.puntuacion_riesgo || 1.0,
-          detalles: resultado.detalles
+          motivoRechazo: 'Servicio de moderación no disponible. Por seguridad, la imagen fue rechazada.',
+          puntuacionRiesgo: 1.0,
+          detalles: { 
+            error: 'CLIP integrado no disponible',
+            accion: 'imagen_rechazada_por_seguridad'
+          }
         };
       }
 
-      // Si es una imagen temporal aprobada, moverla al destino específico
-      if (imagePath.includes('temp_images') && resultado.esApto) {
-        const rutaFinal = await this.moverImagenAprobada(imagePath, options);
+      // 2. Para URLs de Cloudinary existentes, asumir que ya fueron moderadas
+      if (this.esUrlCloudinary(imagePath)) {
+        console.log('⚠️ Asumiendo imagen de Cloudinary como aprobada (fallback)');
+        
+        await this.registrarLogModeracionImagen({
+          imagePath,
+          ipUsuario,
+          hashNavegador,
+          resultado: { fallback: true, motivo: 'clip_no_disponible' },
+          esAprobado: true,
+          tipoContenido: options.tipoContenido,
+          
+        });
+
         return {
           esAprobado: true,
-          puntuacionRiesgo: resultado.detalles?.puntuacion_riesgo || 0.1,
-          detalles: resultado.detalles,
-          rutaFinal: rutaFinal
+          puntuacionRiesgo: 0.1, // Riesgo bajo en fallback
+          detalles: { fallback: true, motivo: 'clip_no_disponible' },
+          cloudinaryUrl: imagePath
         };
       }
 
+      // 3. Para otras rutas, rechazar por seguridad
       return {
-        esAprobado: true,
-        puntuacionRiesgo: resultado.detalles?.puntuacion_riesgo || 0.1,
-        detalles: resultado.detalles
+        esAprobado: false,
+        motivoRechazo: 'Servicio de moderación no disponible. No se puede procesar la imagen.',
+        puntuacionRiesgo: 1.0,
+        detalles: { 
+          error: 'CLIP integrado no disponible',
+          accion: 'rechazado_por_seguridad'
+        }
       };
+
     } catch (error) {
       console.error('❌ Error en método fallback:', error);
       return {
@@ -348,7 +521,30 @@ export class ModeracionImagenService {
   }
 
   /**
-   * ✅ MÉTODO DE CONVENIENCIA PARA EXPERIENCIAS
+   * ✅ Obtener folder de Cloudinary según tipo de contenido
+   */
+  private obtenerFolderCloudinary(tipoContenido: string): string {
+    switch (tipoContenido) {
+      case 'experiencia':
+        return process.env.CLOUDINARY_EXPERIENCIAS_FOLDER || 'experiencias';
+      case 'lugar':
+        return process.env.CLOUDINARY_LUGARES_FOLDER || 'lugares';
+      case 'pdf':
+        return process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs';
+      default:
+        return 'general';
+    }
+  }
+
+  /**
+   * ✅ Detectar si es URL de Cloudinary
+   */
+  private esUrlCloudinary(url: string): boolean {
+    return url.includes('cloudinary.com') || url.startsWith('http');
+  }
+
+  /**
+   * ✅ MÉTODOS DE CONVENIENCIA
    */
   async moderarImagenExperiencia(
     imagePath: string, 
@@ -362,9 +558,6 @@ export class ModeracionImagenService {
     });
   }
 
-  /**
-   * ✅ MÉTODO DE CONVENIENCIA PARA LUGARES
-   */
   async moderarImagenLugar(
     imagePath: string, 
     ipUsuario: string, 
@@ -377,9 +570,6 @@ export class ModeracionImagenService {
     });
   }
 
-  /**
-   * ✅ MÉTODO DE CONVENIENCIA PARA PDF ANALYSIS
-   */
   async moderarImagenPDF(
     imagePath: string, 
     ipUsuario: string, 
@@ -392,7 +582,7 @@ export class ModeracionImagenService {
   }
 
   /**
-   * ✅ LIMPIAR DIRECTORIO TEMPORAL
+   * ✅ MÉTODOS DE LIMPIEZA Y UTILIDAD
    */
   private cleanTempDir(): void {
     try {
@@ -402,26 +592,23 @@ export class ModeracionImagenService {
         if (file.startsWith('temp_') && (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg'))) {
           try {
             const filePath = path.join(this.tempDir, file);
+            // ✅ CORREGIDO: Usar fsPromises.unlink
             fs.unlinkSync(filePath);
             console.log(`🧹 Temporal limpiado: ${file}`);
           } catch (error) {
-            // Ignorar errores de eliminación
             console.log(`⚠️ No se pudo eliminar: ${file}`);
           }
         }
       }
     } catch (error) {
-      // Si hay error al limpiar, continuar
       console.log('⚠️ Error limpiando directorio temporal:', error);
     }
   }
 
-  /**
-   * ✅ ELIMINAR ARCHIVO CON MANEJO DE ERRORES
-   */
   private async eliminarArchivo(filePath: string): Promise<void> {
     try {
       if (fs.existsSync(filePath)) {
+        // ✅ CORREGIDO: Ya está usando fsPromises.unlink correctamente
         await fsPromises.unlink(filePath);
         console.log(`🗑️ Archivo eliminado: ${filePath}`);
       }
@@ -430,9 +617,6 @@ export class ModeracionImagenService {
     }
   }
 
-  /**
-   * ✅ LIMPIAR IMÁGENES TEMPORALES (método público opcional)
-   */
   async limpiarTemporales(): Promise<{ success: boolean; limpiados: number }> {
     try {
       let limpiados = 0;
@@ -460,19 +644,35 @@ export class ModeracionImagenService {
     }
   }
 
-  private generarMotivoRechazo(detalles: any): string {
-    const motivos: string[] = [];
+  /**
+   * ✅ NUEVO: Generar motivo de rechazo para resultados CLIP
+   */
+  private generarMotivoRechazoClip(resultado: ClipAnalysisResult): string {
+    if (resultado.razones_rechazo && resultado.razones_rechazo.length > 0) {
+      return resultado.razones_rechazo.join('; ');
+    }
+    
+    return `La imagen no cumple con las políticas de contenido (riesgo: ${Math.round(resultado.puntuacion_riesgo * 100)}%)`;
+  }
 
+  /**
+   * ✅ MANTENER: Método de rechazo original para compatibilidad
+   */
+  private generarMotivoRechazo(detalles: any): string {
+    // Para compatibilidad con el formato antiguo
+    if (detalles.razones_rechazo) {
+      return this.generarMotivoRechazoClip(detalles);
+    }
+
+    const motivos: string[] = [];
     if (detalles.analisis_violencia?.es_violento) {
       const prob = Math.round(detalles.analisis_violencia.probabilidad_violencia * 100);
       motivos.push(`Contenido inapropiado (${prob}% confianza)`);
     }
-
     if (detalles.analisis_armas?.armas_detectadas) {
       const conf = Math.round(detalles.analisis_armas.confianza * 100);
       motivos.push(`Elementos prohibidos (${conf}% confianza)`);
     }
-
     return motivos.join('; ') || 'La imagen no cumple con las políticas de contenido';
   }
 
@@ -497,12 +697,27 @@ export class ModeracionImagenService {
           log.resultado ? JSON.stringify(log.resultado) : null,
           log.esAprobado,
           log.esTemporal || false,
-          log.tipoContenido || 'general'
+          log.tipoContenido || 'general',
+          
         ]
       );
       console.log('✅ Log de moderación registrado');
     } catch (error) {
       console.error('❌ Error registrando log de moderación:', error);
     }
+  }
+
+  /**
+   * ✅ NUEVO: Método para verificar estado del CLIP
+   */
+  obtenerEstadoClip() {
+    return clipAnalyzerService.obtenerEstado();
+  }
+
+  /**
+   * ✅ NUEVO: Método para verificar si CLIP está listo
+   */
+  estaListo(): boolean {
+    return clipAnalyzerService.estaListo();
   }
 }

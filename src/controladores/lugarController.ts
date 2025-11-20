@@ -1,7 +1,6 @@
-// controladores/lugarController.ts - VERSIÓN MEJORADA PARA MANEJO COMPLETO DE EDICIÓN
+// controladores/lugarController.ts - VERSIÓN CLOUDINARY
 import { Request, Response } from 'express';
 import { pool } from '../utils/baseDeDatos';
-import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import sharp from 'sharp';
 import path from 'path';
@@ -9,6 +8,8 @@ import { ModeracionService } from '../services/moderacionService';
 import { generarHashNavegador } from '../utils/hashNavegador';
 import { ModeracionImagenService } from '../services/moderacionImagenService';
 import { PdfAnalysisService } from '../services/pdfAnalysisService';
+import { CloudinaryService } from '../services/cloudinaryService'; // 🆕 NUEVO
+
 
 const generarSugerenciasLugar = (tipoProblema: string): string[] => {
   const sugerencias: string[] = [];
@@ -532,254 +533,262 @@ export const lugarController = {
   },
 
 
-/**
- * ✅ CORREGIDO: Crear lugar con moderación DE TEXTO, IMAGEN Y PDF (TODO EN UN SOLO PASO)
- */
-async crearLugar(req: Request, res: Response) {
-  const client = await pool.connect();
-  
-  try {
-    const imageFile = req.file; // Archivo de imagen
-    const { nombre, descripcion, ubicacion, categoria, foto_principal_url, pdf_url } = req.body;
+  /**
+   * ✅ ACTUALIZADO: Crear lugar con Cloudinary
+   */
+  async crearLugar(req: Request, res: Response) {
+    const client = await pool.connect();
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
+    try {
+      const imageFile = req.file; // Archivo de imagen
+      const { nombre, descripcion, ubicacion, categoria, foto_principal_url, pdf_url } = req.body;
 
-    // ✅ VERIFICAR QUE LOS DATOS LLEGUEN CORRECTAMENTE
-    console.log('📦 Datos recibidos para crear lugar:', {
-      tieneArchivoImagen: !!imageFile,
-      tienePdfUrl: !!pdf_url,
-      nombre: nombre ? `"${nombre.substring(0, 30)}..."` : 'undefined',
-      descripcion: descripcion ? `"${descripcion.substring(0, 50)}..."` : 'undefined',
-      ubicacion: ubicacion || 'undefined',
-      categoria: categoria || 'undefined',
-      pdf_url: pdf_url ? 'PROPORCIONADO' : 'NO_PROPORCIONADO'
-    });
-
-    // Validaciones básicas
-    if (!nombre?.trim() || !descripcion?.trim() || !ubicacion?.trim() || !categoria?.trim()) {
-      // Limpiar archivo si existe
-      if (imageFile) {
-        await fsPromises.unlink(imageFile.path).catch(console.error);
-      }
-      return res.status(400).json({
-        success: false,
-        error: 'Nombre, descripción, ubicación y categoría son requeridos'
+      // ✅ VERIFICAR QUE LOS DATOS LLEGUEN CORRECTAMENTE
+      console.log('📦 Datos recibidos para crear lugar:', {
+        tieneArchivoImagen: !!imageFile,
+        tienePdfUrl: !!pdf_url,
+        nombre: nombre ? `"${nombre.substring(0, 30)}..."` : 'undefined',
+        descripcion: descripcion ? `"${descripcion.substring(0, 50)}..."` : 'undefined',
+        ubicacion: ubicacion || 'undefined',
+        categoria: categoria || 'undefined',
+        pdf_url: pdf_url ? 'PROPORCIONADO' : 'NO_PROPORCIONADO'
       });
-    }
 
-    const hashNavegador = generarHashNavegador(req);
-    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-
-    console.log('📍 Nuevo lugar desde:', {
-      hashNavegador: hashNavegador.substring(0, 10) + '...',
-      ip: ipUsuario,
-      nombre: nombre
-    });
-
-    const moderacionService = new ModeracionService();
-    const moderacionImagenService = new ModeracionImagenService();
-
-    // ✅ INICIAR TRANSACCIÓN PARA GARANTIZAR CONSISTENCIA
-    await client.query('BEGIN');
-
-    // ✅ 1. PRIMERO MODERAR EL TEXTO (NOMBRE + DESCRIPCIÓN)
-    const textoParaModerar = `${nombre} ${descripcion}`;
-    
-    console.log('🔍 Enviando texto para moderación:', textoParaModerar.substring(0, 100) + '...');
-    
-    const resultadoModeracionTexto = await moderacionService.moderarContenidoEnTiempoReal({
-      texto: textoParaModerar,
-      ipUsuario,
-      hashNavegador
-    });
-
-    if (!resultadoModeracionTexto.esAprobado) {
-      console.log('❌ Contenido de lugar rechazado por moderación:', resultadoModeracionTexto.motivoRechazo);
-      
-      // Limpiar archivo si existe
-      if (imageFile) {
-        await fsPromises.unlink(imageFile.path).catch(console.error);
-      }
-      
-      await client.query('ROLLBACK');
-
-      return res.status(400).json({
-        success: false,
-        error: 'CONTENIDO_RECHAZADO',
-        message: 'El contenido no cumple con las políticas de moderación',
-        motivo: resultadoModeracionTexto.motivoRechazo,
-        tipo: 'moderacion_texto',
-        detalles: {
-          puntuacion: resultadoModeracionTexto.puntuacionGeneral,
-          problemas: [resultadoModeracionTexto.motivoRechazo || 'Texto no aprobado por moderación'],
-          sugerencias: [
-            'Revisa que el texto sea coherente y tenga sentido',
-            'Evita contenido ofensivo o inapropiado',
-            'Asegúrate de que el texto sea descriptivo y claro'
-          ],
-          campoEspecifico: 'descripcion',
-          timestamp: new Date().toISOString()
+      // Validaciones básicas
+      if (!nombre?.trim() || !descripcion?.trim() || !ubicacion?.trim() || !categoria?.trim()) {
+        // Limpiar archivo si existe
+        if (imageFile) {
+          await fsPromises.unlink(imageFile.path).catch(console.error);
         }
-      });
-    }
-
-    // ✅ 2. MODERAR LA IMAGEN SI SE PROPORCIONA
-    let imagenAprobada = true;
-    let resultadoModeracionImagen = null;
-    let rutaImagenFinal = foto_principal_url;
-
-    if (imageFile) {
-      console.log('🖼️ Iniciando moderación de imagen para lugar...');
-      resultadoModeracionImagen = await moderacionImagenService.moderarImagenLugar(
-        imageFile.path,
-        ipUsuario,
-        hashNavegador
-      );
-
-      if (!resultadoModeracionImagen.esAprobado) {
-        imagenAprobada = false;
-        console.log('❌ Imagen rechazada por moderación:', resultadoModeracionImagen.motivoRechazo);
-        
-        // Eliminar archivo subido
-        await fsPromises.unlink(imageFile.path).catch(console.error);
-        
-        await client.query('ROLLBACK');
-        
         return res.status(400).json({
           success: false,
-          error: 'IMAGEN_RECHAZADA',
-          message: 'La imagen no cumple con las políticas de contenido',
-          motivo: resultadoModeracionImagen.motivoRechazo,
-          tipo: 'imagen',
+          error: 'Nombre, descripción, ubicación y categoría son requeridos'
+        });
+      }
+
+      const hashNavegador = generarHashNavegador(req);
+      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+      console.log('📍 Nuevo lugar desde:', {
+        hashNavegador: hashNavegador.substring(0, 10) + '...',
+        ip: ipUsuario,
+        nombre: nombre
+      });
+
+      const moderacionService = new ModeracionService();
+      const moderacionImagenService = new ModeracionImagenService();
+
+      // ✅ INICIAR TRANSACCIÓN PARA GARANTIZAR CONSISTENCIA
+      await client.query('BEGIN');
+
+      // ✅ 1. PRIMERO MODERAR EL TEXTO (NOMBRE + DESCRIPCIÓN)
+      const textoParaModerar = `${nombre} ${descripcion}`;
+      
+      console.log('🔍 Enviando texto para moderación:', textoParaModerar.substring(0, 100) + '...');
+      
+      const resultadoModeracionTexto = await moderacionService.moderarContenidoEnTiempoReal({
+        texto: textoParaModerar,
+        ipUsuario,
+        hashNavegador
+      });
+
+      if (!resultadoModeracionTexto.esAprobado) {
+        console.log('❌ Contenido de lugar rechazado por moderación:', resultadoModeracionTexto.motivoRechazo);
+        
+        // Limpiar archivo si existe
+        if (imageFile) {
+          await fsPromises.unlink(imageFile.path).catch(console.error);
+        }
+        
+        await client.query('ROLLBACK');
+
+        return res.status(400).json({
+          success: false,
+          error: 'CONTENIDO_RECHAZADO',
+          message: 'El contenido no cumple con las políticas de moderación',
+          motivo: resultadoModeracionTexto.motivoRechazo,
+          tipo: 'moderacion_texto',
           detalles: {
-            puntuacion: resultadoModeracionImagen.puntuacionRiesgo,
-            problemas: [resultadoModeracionImagen.motivoRechazo || 'Contenido inapropiado detectado'],
-            sugerencias: generarSugerenciasLugar('imagen'),
+            puntuacion: resultadoModeracionTexto.puntuacionGeneral,
+            problemas: [resultadoModeracionTexto.motivoRechazo || 'Texto no aprobado por moderación'],
+            sugerencias: [
+              'Revisa que el texto sea coherente y tenga sentido',
+              'Evita contenido ofensivo o inapropiado',
+              'Asegúrate de que el texto sea descriptivo y claro'
+            ],
+            campoEspecifico: 'descripcion',
             timestamp: new Date().toISOString()
           }
         });
       }
 
-      console.log('✅ Imagen aprobada por moderación para lugar');
-      // Construir URL de imagen
-      rutaImagenFinal = `/uploads/images/lugares/${imageFile.filename}`;
-    }
+      // ✅ 2. MODERAR Y SUBIR IMAGEN A CLOUDINARY SI SE PROPORCIONA
+      let imagenAprobada = true;
+      let resultadoModeracionImagen = null;
+      let cloudinaryImageResult = null;
+      let rutaImagenFinal = foto_principal_url;
 
-    // ✅ 3. SOLO SI TODO ESTÁ APROBADO, INSERTAR LUGAR (INCLUYENDO PDF SI EXISTE)
-    const result = await client.query(
-      `INSERT INTO lugares 
-       (nombre, descripcion, ubicacion, categoria, foto_principal_url, pdf_url)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [
-        nombre.trim(), 
-        descripcion.trim(), 
-        ubicacion.trim(), 
-        categoria.trim(), 
-        rutaImagenFinal || null, 
-        pdf_url || null  // ✅ INCLUIR PDF SI FUE APROBADO
-      ]
-    );
+      if (imageFile) {
+        console.log('🖼️ Iniciando moderación de imagen para lugar...');
+        
+        // 🆕 NUEVO: Leer archivo y moderar desde buffer
+        const fileBuffer = await fsPromises.readFile(imageFile.path);
+        resultadoModeracionImagen = await moderacionImagenService.moderarImagenDesdeBuffer(
+          fileBuffer,
+          imageFile.filename,
+          ipUsuario,
+          hashNavegador
+        );
 
-    const lugar = result.rows[0];
+        if (!resultadoModeracionImagen.esAprobado) {
+          imagenAprobada = false;
+          console.log('❌ Imagen rechazada por moderación:', resultadoModeracionImagen.motivoRechazo);
+          
+          // Eliminar archivo subido
+          await fsPromises.unlink(imageFile.path).catch(console.error);
+          
+          await client.query('ROLLBACK');
+          
+          return res.status(400).json({
+            success: false,
+            error: 'IMAGEN_RECHAZADA',
+            message: 'La imagen no cumple con las políticas de contenido',
+            motivo: resultadoModeracionImagen.motivoRechazo,
+            tipo: 'imagen',
+            detalles: {
+              puntuacion: resultadoModeracionImagen.puntuacionRiesgo,
+              problemas: [resultadoModeracionImagen.motivoRechazo || 'Contenido inapropiado detectado'],
+              sugerencias: generarSugerenciasLugar('imagen'),
+              timestamp: new Date().toISOString()
+            }
+          });
+        }
 
-    // ✅ 4. SI HAY IMAGEN APROBADA, GUARDAR EN fotos_lugares
-    if (imageFile && imagenAprobada) {
-      // Obtener dimensiones de la imagen
-      let anchoImagen: number | null = null;
-      let altoImagen: number | null = null;
-      
-      try {
-        const metadata = await sharp(imageFile.path).metadata();
-        anchoImagen = metadata.width || null;
-        altoImagen = metadata.height || null;
-      } catch (sharpError) {
-        console.warn('⚠️ No se pudieron obtener dimensiones:', sharpError);
+        console.log('✅ Imagen aprobada por moderación para lugar');
+
+        // 🆕 NUEVO: Subir a Cloudinary
+        cloudinaryImageResult = await cloudinaryService.subirArchivo(
+          fileBuffer,
+          imageFile.filename,
+          process.env.CLOUDINARY_LUGARES_FOLDER || 'lugares'
+        );
+
+        // 🆕 NUEVO: Limpiar archivo temporal
+        await fsPromises.unlink(imageFile.path);
+
+        rutaImagenFinal = cloudinaryImageResult.secure_url;
       }
 
-      await client.query(
-        `INSERT INTO fotos_lugares 
-         (lugar_id, url_foto, es_principal, descripcion, orden, 
-          ruta_almacenamiento, tamaño_archivo, tipo_archivo, ancho_imagen, alto_imagen)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      // ✅ 3. SOLO SI TODO ESTÁ APROBADO, INSERTAR LUGAR (INCLUYENDO PDF SI EXISTE)
+      const result = await client.query(
+        `INSERT INTO lugares 
+         (nombre, descripcion, ubicacion, categoria, foto_principal_url, pdf_url)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
         [
-          lugar.id,
-          rutaImagenFinal,
-          true,
-          'Imagen principal del lugar',
-          1,
-          imageFile.path,
-          imageFile.size,
-          imageFile.mimetype,
-          anchoImagen,
-          altoImagen
+          nombre.trim(), 
+          descripcion.trim(), 
+          ubicacion.trim(), 
+          categoria.trim(), 
+          rutaImagenFinal || null, 
+          pdf_url || null
         ]
       );
-    }
 
-    await client.query('COMMIT');
+      const lugar = result.rows[0];
 
-    console.log('✅ Lugar creado y publicado:', {
-      id: lugar.id,
-      nombre: lugar.nombre,
-      moderacion_texto: 'aprobado',
-      moderacion_imagen: imagenAprobada ? 'aprobado' : 'sin imagen',
-      moderacion_pdf: pdf_url ? 'aprobado' : 'sin pdf'
-    });
+      // ✅ 4. SI HAY IMAGEN APROBADA, GUARDAR EN fotos_lugares CON DATOS DE CLOUDINARY
+      if (imageFile && imagenAprobada && cloudinaryImageResult) {
+        await client.query(
+          `INSERT INTO fotos_lugares 
+           (lugar_id, url_foto, es_principal, descripcion, orden, 
+            ruta_almacenamiento, tamaño_archivo, tipo_archivo, ancho_imagen, alto_imagen)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            lugar.id,
+            cloudinaryImageResult.secure_url,
+            true,
+            'Imagen principal del lugar',
+            1,
+            cloudinaryImageResult.public_id, // 🆕 public_id para eliminación
+            cloudinaryImageResult.bytes,
+            `image/${cloudinaryImageResult.format}`,
+            cloudinaryImageResult.width || null,
+            cloudinaryImageResult.height || null
+          ]
+        );
+      }
 
-    // Respuesta al usuario
-    res.status(201).json({
-      success: true,
-      mensaje: 'Lugar creado exitosamente.',
-      lugar: {
+      await client.query('COMMIT');
+
+      console.log('✅ Lugar creado y publicado con Cloudinary:', {
         id: lugar.id,
         nombre: lugar.nombre,
-        descripcion: lugar.descripcion,
-        ubicacion: lugar.ubicacion,
-        categoria: lugar.categoria,
-        foto_principal_url: lugar.foto_principal_url,
-        pdf_url: lugar.pdf_url,
-        creado_en: lugar.creado_en
-      },
-      moderacion: {
-        texto: {
-          esAprobado: true,
-          puntuacion: resultadoModeracionTexto.puntuacionGeneral
-        },
-        imagen: imageFile ? {
-          esAprobado: imagenAprobada,
-          puntuacion: resultadoModeracionImagen?.puntuacionRiesgo
-        } : null,
-        pdf: pdf_url ? {
-          esAprobado: true,
-          url: pdf_url
-        } : null
-      }
-    });
+        moderacion_texto: 'aprobado',
+        moderacion_imagen: imagenAprobada ? 'aprobado' : 'sin imagen',
+        moderacion_pdf: pdf_url ? 'aprobado' : 'sin pdf'
+      });
 
-  } catch (error) {
-    await client.query('ROLLBACK').catch(console.error);
-    
-    // Limpiar archivo en caso de error
-    if (req.file) {
-      await fsPromises.unlink(req.file.path).catch(console.error);
+      // Respuesta al usuario
+      res.status(201).json({
+        success: true,
+        mensaje: 'Lugar creado exitosamente.',
+        lugar: {
+          id: lugar.id,
+          nombre: lugar.nombre,
+          descripcion: lugar.descripcion,
+          ubicacion: lugar.ubicacion,
+          categoria: lugar.categoria,
+          foto_principal_url: lugar.foto_principal_url,
+          pdf_url: lugar.pdf_url,
+          creado_en: lugar.creado_en
+        },
+        moderacion: {
+          texto: {
+            esAprobado: true,
+            puntuacion: resultadoModeracionTexto.puntuacionGeneral
+          },
+          imagen: imageFile ? {
+            esAprobado: imagenAprobada,
+            puntuacion: resultadoModeracionImagen?.puntuacionRiesgo
+          } : null,
+          pdf: pdf_url ? {
+            esAprobado: true,
+            url: pdf_url
+          } : null
+        }
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK').catch(console.error);
+      
+      // Limpiar archivo en caso de error
+      if (req.file) {
+        await fsPromises.unlink(req.file.path).catch(console.error);
+      }
+      
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('❌ Error creando lugar:', errorMessage);
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al crear lugar' 
+      });
+    } finally {
+      client.release();
     }
-    
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('❌ Error creando lugar:', errorMessage);
-    res.status(500).json({ 
-      success: false,
-      error: 'Error al crear lugar' 
-    });
-  } finally {
-    client.release();
-  }
-},
+  },
+
+// En lugarController.ts - Método subirPDFTemporal mejorado
 
 /**
- * ✅ NUEVO: Subir PDF temporal para creación de lugar
+ * ✅ VERSIÓN MEJORADA: Subir PDF temporal con manejo completo
  */
 async subirPDFTemporal(req: Request, res: Response) {
+  const cloudinaryService = new CloudinaryService();
+  
   try {
-    console.log('📄 Subiendo PDF temporal para creación de lugar...');
+    console.log('📄 Iniciando upload de PDF temporal...');
 
     if (!req.file) {
       return res.status(400).json({ 
@@ -788,14 +797,36 @@ async subirPDFTemporal(req: Request, res: Response) {
       });
     }
 
+    console.log('📊 Detalles del archivo PDF:', {
+      nombre: req.file.filename,
+      tamaño: req.file.size,
+      mimetype: req.file.mimetype,
+      path: req.file.path
+    });
+
     const hashNavegador = generarHashNavegador(req);
     const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
 
-    // ✅ NUEVO: Análisis del PDF
+    // ✅ 1. VALIDACIÓN DE ARCHIVO PDF
+    if (req.file.mimetype !== 'application/pdf') {
+      await fsPromises.unlink(req.file.path);
+      return res.status(400).json({
+        success: false,
+        error: 'ARCHIVO_NO_PDF',
+        message: 'El archivo debe ser un PDF válido',
+        detalles: {
+          mimetype_recibido: req.file.mimetype,
+          mimetype_esperado: 'application/pdf'
+        }
+      });
+    }
+
+    // ✅ 2. ANÁLISIS DE CONTENIDO (local primero)
     const pdfAnalysisService = new PdfAnalysisService();
     
-    // Validación básica primero
+    console.log('🔍 Validando PDF básico...');
     const validacionBasica = await pdfAnalysisService.validarPDFBasico(req.file.path);
+    
     if (!validacionBasica.valido) {
       await fsPromises.unlink(req.file.path);
       return res.status(400).json({
@@ -806,32 +837,24 @@ async subirPDFTemporal(req: Request, res: Response) {
           problemas: [validacionBasica.error || 'Archivo PDF no válido'],
           sugerencias: [
             'Asegúrate de que el archivo sea un PDF válido',
-            'Verifica que el tamaño no supere los 10MB',
+            'Verifica que el PDF no esté corrupto',
             'Intenta con otro archivo PDF'
           ]
         }
       });
     }
 
-    console.log('✅ PDF válido, procediendo con análisis de contenido...');
-
-    // Análisis de contenido textual
+    console.log('✅ PDF válido, analizando contenido...');
     const resultadoAnalisis = await pdfAnalysisService.analizarTextoPDF(
       req.file.path,
       ipUsuario,
       hashNavegador
     );
 
-    // ✅ SI EL PDF ES RECHAZADO
+    // ✅ 3. SI ES RECHAZADO POR MODERACIÓN
     if (!resultadoAnalisis.esAprobado) {
       console.log('❌ PDF rechazado por moderación:', resultadoAnalisis.motivo);
-      
-      // Eliminar archivo
-      try {
-        await fsPromises.unlink(req.file.path);
-      } catch (error) {
-        console.error('Error eliminando PDF:', error);
-      }
+      await fsPromises.unlink(req.file.path);
       
       return res.status(400).json({
         success: false,
@@ -852,14 +875,41 @@ async subirPDFTemporal(req: Request, res: Response) {
       });
     }
 
-    console.log('✅ PDF aprobado por moderación');
+    console.log('✅ PDF aprobado por moderación, subiendo a Cloudinary...');
 
-    const rutaPDF = `/uploads/pdfs/${req.file.filename}`;
+    // ✅ 4. SUBIR A CLOUDINARY CON CONFIGURACIÓN ESPECÍFICA
+    const fileBuffer = await fsPromises.readFile(req.file.path);
+    const cloudinaryResult = await cloudinaryService.subirPDF(
+      fileBuffer,
+      req.file.filename,
+      process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs_lugares'
+    );
 
+    // ✅ 5. LIMPIAR ARCHIVO TEMPORAL
+    await fsPromises.unlink(req.file.path);
+
+    console.log('🎉 PDF procesado exitosamente:', {
+      url: cloudinaryResult.secure_url,
+      public_id: cloudinaryResult.public_id,
+      tamaño: cloudinaryResult.bytes
+    });
+
+    // ✅ 6. VERIFICACIÓN FINAL DE ACCESO
+    const esAccesible = await cloudinaryService.verificarAccesoPDF(cloudinaryResult.secure_url);
+
+    // ✅ 7. RESPUESTA COMPLETA
     res.json({
       success: true,
-      mensaje: 'PDF aprobado para crear lugar',
-      url_pdf: rutaPDF,
+      mensaje: 'PDF aprobado y subido exitosamente',
+      url_pdf: cloudinaryResult.secure_url,
+      es_accesible: esAccesible,
+      detalles_cloudinary: {
+        public_id: cloudinaryResult.public_id,
+        folder: cloudinaryResult.folder,
+        resource_type: cloudinaryResult.resource_type,
+        formato: cloudinaryResult.format,
+        bytes: cloudinaryResult.bytes
+      },
       moderacion: {
         esAprobado: true,
         puntuacion: resultadoAnalisis.puntuacion,
@@ -869,25 +919,27 @@ async subirPDFTemporal(req: Request, res: Response) {
         nombre: req.file.filename,
         tamaño: req.file.size,
         tipo: req.file.mimetype
-      }
+      },
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('❌ Error subiendo PDF temporal:', error);
+    console.error('💥 Error crítico subiendo PDF temporal:', error);
     
-    // Limpiar archivo en caso de error
+    // Limpieza en caso de error
     if (req.file?.path) {
       try {
         await fsPromises.unlink(req.file.path);
+        console.log('🧹 Archivo temporal limpiado por error');
       } catch (unlinkError) {
-        console.error('Error eliminando archivo:', unlinkError);
+        console.error('Error limpiando archivo temporal:', unlinkError);
       }
     }
     
     res.status(500).json({ 
       success: false,
-      error: 'Error al procesar PDF',
-      detalle: error instanceof Error ? error.message : 'Error desconocido'
+      error: 'Error interno al procesar PDF',
+      detalle: process.env.NODE_ENV === 'development' ? error instanceof Error ? error.message : String(error) : 'Contacta al administrador'
     });
   }
 },
@@ -1359,13 +1411,15 @@ async subirPDFTemporal(req: Request, res: Response) {
   },
 
   /**
-   * ✅ CORREGIDO: Subir imagen principal CON moderación (igual que experiencias)
+   * ✅ ACTUALIZADO: Subir imagen principal CON Cloudinary
    */
   async subirImagenLugar(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
     try {
       const { id } = req.params;
       
-      console.log('🖼️ Subiendo imagen principal para lugar con moderación:', id);
+      console.log('🖼️ Subiendo imagen principal para lugar con moderación y Cloudinary:', id);
 
       if (!req.file) {
         return res.status(400).json({ 
@@ -1374,14 +1428,17 @@ async subirPDFTemporal(req: Request, res: Response) {
         });
       }
 
-      // ✅ MODERACIÓN DE IMAGEN (igual que en experiencias)
+      // ✅ MODERACIÓN DE IMAGEN
       const hashNavegador = generarHashNavegador(req);
       const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
 
       const moderacionImagenService = new ModeracionImagenService();
       
-      const resultadoModeracion = await moderacionImagenService.moderarImagenLugar(
-        req.file.path,
+      // 🆕 NUEVO: Leer y moderar desde buffer
+      const fileBuffer = await fsPromises.readFile(req.file.path);
+      const resultadoModeracion = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        req.file.filename,
         ipUsuario,
         hashNavegador
       );
@@ -1434,19 +1491,15 @@ async subirPDFTemporal(req: Request, res: Response) {
         });
       }
 
-      const rutaImagen = `/uploads/images/lugares/${req.file.filename}`;
+      // 🆕 NUEVO: Subir a Cloudinary
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        req.file.filename,
+        process.env.CLOUDINARY_LUGARES_FOLDER || 'lugares'
+      );
 
-      // Obtener dimensiones de la imagen
-      let anchoImagen: number | null = null;
-      let altoImagen: number | null = null;
-      
-      try {
-        const metadata = await sharp(req.file.path).metadata();
-        anchoImagen = metadata.width || null;
-        altoImagen = metadata.height || null;
-      } catch (sharpError) {
-        console.warn('⚠️ No se pudieron obtener dimensiones:', sharpError);
-      }
+      // 🆕 NUEVO: Limpiar archivo temporal
+      await fsPromises.unlink(req.file.path);
 
       // Verificar si ya existe una imagen principal
       const imagenPrincipalExistente = await pool.query(
@@ -1460,18 +1513,14 @@ async subirPDFTemporal(req: Request, res: Response) {
         // Actualizar la imagen principal existente
         const imagenId = imagenPrincipalExistente.rows[0].id;
         
-        // Eliminar archivo anterior si existe
-        const imagenAnterior = await pool.query(
-          'SELECT ruta_almacenamiento FROM fotos_lugares WHERE id = $1',
-          [imagenId]
-        );
-        
-        if (imagenAnterior.rows[0]?.ruta_almacenamiento) {
+        // 🆕 NUEVO: Eliminar imagen anterior de Cloudinary
+        if (imagenPrincipalExistente.rows[0].ruta_almacenamiento && 
+            cloudinaryService.esUrlCloudinary(imagenPrincipalExistente.rows[0].ruta_almacenamiento)) {
           try {
-            await fsPromises.access(imagenAnterior.rows[0].ruta_almacenamiento);
-            await fsPromises.unlink(imagenAnterior.rows[0].ruta_almacenamiento);
+            await cloudinaryService.eliminarArchivo(imagenPrincipalExistente.rows[0].ruta_almacenamiento);
+            console.log('🗑️ Imagen anterior eliminada de Cloudinary');
           } catch (error) {
-            console.log('Archivo anterior no encontrado o no se pudo eliminar:', error);
+            console.warn('⚠️ No se pudo eliminar la imagen anterior de Cloudinary:', error);
           }
         }
 
@@ -1481,7 +1530,15 @@ async subirPDFTemporal(req: Request, res: Response) {
                tipo_archivo = $4, ancho_imagen = $5, alto_imagen = $6, actualizado_en = NOW()
            WHERE id = $7
            RETURNING id`,
-          [rutaImagen, req.file.path, req.file.size, req.file.mimetype, anchoImagen, altoImagen, imagenId]
+          [
+            cloudinaryResult.secure_url,
+            cloudinaryResult.public_id,
+            cloudinaryResult.bytes,
+            `image/${cloudinaryResult.format}`,
+            cloudinaryResult.width || null,
+            cloudinaryResult.height || null,
+            imagenId
+          ]
         );
       } else {
         // Insertar nueva imagen principal
@@ -1492,15 +1549,15 @@ async subirPDFTemporal(req: Request, res: Response) {
            RETURNING id`,
           [
             id,
-            rutaImagen,
+            cloudinaryResult.secure_url,
             true,
             'Imagen principal del lugar',
             1,
-            req.file.path,
-            req.file.size,
-            req.file.mimetype,
-            anchoImagen,
-            altoImagen
+            cloudinaryResult.public_id,
+            cloudinaryResult.bytes,
+            `image/${cloudinaryResult.format}`,
+            cloudinaryResult.width || null,
+            cloudinaryResult.height || null
           ]
         );
       }
@@ -1508,15 +1565,15 @@ async subirPDFTemporal(req: Request, res: Response) {
       // Actualizar también la foto_principal_url en la tabla lugares
       await pool.query(
         'UPDATE lugares SET foto_principal_url = $1, actualizado_en = NOW() WHERE id = $2',
-        [rutaImagen, id]
+        [cloudinaryResult.secure_url, id]
       );
 
-      console.log('✅ Imagen principal subida y aprobada para lugar:', id);
+      console.log('✅ Imagen principal subida y aprobada para lugar con Cloudinary:', id);
 
       res.json({
         success: true,
         mensaje: 'Imagen subida exitosamente',
-        url_imagen: rutaImagen,
+        url_imagen: cloudinaryResult.secure_url,
         es_principal: true,
         imagen_id: result.rows[0].id,
         moderacion: {
@@ -1526,8 +1583,8 @@ async subirPDFTemporal(req: Request, res: Response) {
         },
         archivo: {
           nombre: req.file.filename,
-          tamaño: req.file.size,
-          tipo: req.file.mimetype
+          tamaño: cloudinaryResult.bytes,
+          tipo: `image/${cloudinaryResult.format}`
         }
       });
 
@@ -1551,10 +1608,11 @@ async subirPDFTemporal(req: Request, res: Response) {
   },
 
   /**
-   * ✅ CORREGIDO: Subir múltiples imágenes CON moderación (igual que experiencias)
+   * ✅ ACTUALIZADO: Subir múltiples imágenes CON Cloudinary
    */
   async subirMultipleImagenesLugar(req: Request, res: Response) {
     const client = await pool.connect();
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
     
     try {
       const { id } = req.params;
@@ -1566,7 +1624,7 @@ async subirPDFTemporal(req: Request, res: Response) {
         });
       }
 
-      console.log('📤 Subiendo múltiples imágenes para galería del lugar con moderación:', id);
+      console.log('📤 Subiendo múltiples imágenes para galería del lugar con moderación y Cloudinary:', id);
 
       await client.query('BEGIN');
 
@@ -1599,12 +1657,15 @@ async subirPDFTemporal(req: Request, res: Response) {
       const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
       const moderacionImagenService = new ModeracionImagenService();
 
-      // ✅ MODERAR CADA IMAGEN (igual que en experiencias)
+      // ✅ MODERAR Y SUBIR CADA IMAGEN A CLOUDINARY
       const imagenesAceptadas = [];
       
       for (const file of req.files) {
-        const resultadoModeracion = await moderacionImagenService.moderarImagenLugar(
-          file.path,
+        // 🆕 NUEVO: Leer y moderar desde buffer
+        const fileBuffer = await fsPromises.readFile(file.path);
+        const resultadoModeracion = await moderacionImagenService.moderarImagenDesdeBuffer(
+          fileBuffer,
+          file.filename,
           ipUsuario,
           hashNavegador
         );
@@ -1618,7 +1679,21 @@ async subirPDFTemporal(req: Request, res: Response) {
             console.error('Error eliminando archivo:', error);
           }
         } else {
-          imagenesAceptadas.push(file);
+          // 🆕 NUEVO: Subir a Cloudinary
+          const cloudinaryResult = await cloudinaryService.subirArchivo(
+            fileBuffer,
+            file.filename,
+            process.env.CLOUDINARY_LUGARES_FOLDER || 'lugares'
+          );
+          
+          // 🆕 NUEVO: Limpiar archivo temporal
+          await fsPromises.unlink(file.path);
+          
+          imagenesAceptadas.push({
+            file,
+            cloudinaryResult,
+            resultadoModeracion
+          });
           console.log('✅ Imagen aprobada para galería:', file.filename);
         }
       }
@@ -1648,26 +1723,12 @@ async subirPDFTemporal(req: Request, res: Response) {
       const imagenesSubidas = [];
 
       // 3. Insertar cada imagen aprobada como NO principal
-      for (const file of imagenesAceptadas) {
-        const rutaImagen = `/uploads/images/lugares/${file.filename}`;
-        
-        console.log('💾 Guardando imagen de galería aprobada:', {
+      for (const { file, cloudinaryResult } of imagenesAceptadas) {
+        console.log('💾 Guardando imagen de galería aprobada en Cloudinary:', {
           nombre: file.filename,
           orden: orden,
           es_principal: false
         });
-
-        // Obtener dimensiones
-        let anchoImagen: number | null = null;
-        let altoImagen: number | null = null;
-        
-        try {
-          const metadata = await sharp(file.path).metadata();
-          anchoImagen = metadata.width || null;
-          altoImagen = metadata.height || null;
-        } catch (sharpError) {
-          console.warn('⚠️ No se pudieron obtener dimensiones:', sharpError);
-        }
 
         // Insertar imagen EXPLÍCITAMENTE como no principal
         const result = await client.query(
@@ -1678,20 +1739,20 @@ async subirPDFTemporal(req: Request, res: Response) {
            RETURNING id, url_foto, es_principal, orden`,
           [
             id,
-            rutaImagen,
-            file.path,
+            cloudinaryResult.secure_url,
+            cloudinaryResult.public_id,
             `Imagen ${orden} - ${lugar.nombre}`,
             false,
             orden,
-            anchoImagen,
-            altoImagen,
-            file.size,
-            file.mimetype
+            cloudinaryResult.width || null,
+            cloudinaryResult.height || null,
+            cloudinaryResult.bytes,
+            `image/${cloudinaryResult.format}`
           ]
         );
 
         const imagenInsertada = result.rows[0];
-        console.log('✅ Imagen de galería insertada:', {
+        console.log('✅ Imagen de galería insertada en Cloudinary:', {
           id: imagenInsertada.id, 
           es_principal: imagenInsertada.es_principal
         });
@@ -1708,7 +1769,7 @@ async subirPDFTemporal(req: Request, res: Response) {
       }
 
       await client.query('COMMIT');
-      console.log('✅ Galería actualizada - Imágenes aprobadas agregadas:', imagenesSubidas.length);
+      console.log('✅ Galería actualizada - Imágenes aprobadas agregadas a Cloudinary:', imagenesSubidas.length);
 
       res.json({
         success: true,
@@ -1904,148 +1965,159 @@ async subirPDFTemporal(req: Request, res: Response) {
 
   // controladores/lugarController.ts - AGREGAR este método
 
-/**
- * ✅ NUEVO: Subir PDF CON moderación de contenido textual
- */
-async subirPDFLugarConModeracion(req: Request, res: Response) {
-  try {
-    const { id } = req.params;
+  /**
+   * ✅ ACTUALIZADO: Subir PDF CON moderación Y Cloudinary
+   */
+  async subirPDFLugarConModeracion(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
     
-    console.log('📄 Subiendo PDF con moderación para lugar:', id);
-
-    if (!req.file) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'No se proporcionó ningún PDF' 
-      });
-    }
-
-    const hashNavegador = generarHashNavegador(req);
-    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-
-    // ✅ NUEVO: Análisis del PDF
-    const pdfAnalysisService = new PdfAnalysisService();
-    
-    // Validación básica primero
-    const validacionBasica = await pdfAnalysisService.validarPDFBasico(req.file.path);
-    if (!validacionBasica.valido) {
-      await fsPromises.unlink(req.file.path);
-      return res.status(400).json({
-        success: false,
-        error: 'PDF_INVALIDO',
-        message: validacionBasica.error || 'PDF no válido',
-        detalles: {
-          problemas: [validacionBasica.error || 'Archivo PDF no válido'],
-          sugerencias: [
-            'Asegúrate de que el archivo sea un PDF válido',
-            'Verifica que el tamaño no supere los 10MB',
-            'Intenta con otro archivo PDF'
-          ]
-        }
-      });
-    }
-
-    console.log('✅ PDF válido, procediendo con análisis de contenido...');
-
-    // Análisis de contenido textual
-    const resultadoAnalisis = await pdfAnalysisService.analizarTextoPDF(
-      req.file.path,
-      ipUsuario,
-      hashNavegador
-    );
-
-    // ✅ SI EL PDF ES RECHAZADO
-    if (!resultadoAnalisis.esAprobado) {
-      console.log('❌ PDF rechazado por moderación:', resultadoAnalisis.motivo);
+    try {
+      const { id } = req.params;
       
-      // Eliminar archivo
-      try {
-        await fsPromises.unlink(req.file.path);
-      } catch (error) {
-        console.error('Error eliminando PDF:', error);
+      console.log('📄 Subiendo PDF con moderación Y CLOUDINARY para lugar:', id);
+
+      if (!req.file) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'No se proporcionó ningún PDF' 
+        });
       }
+
+      const hashNavegador = generarHashNavegador(req);
+      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+      // ✅ Análisis del PDF
+      const pdfAnalysisService = new PdfAnalysisService();
       
-      return res.status(400).json({
-        success: false,
-        error: 'PDF_RECHAZADO',
-        message: 'El contenido del PDF no cumple con las políticas de moderación',
-        motivo: resultadoAnalisis.motivo,
-        tipo: 'pdf_texto',
-        detalles: {
+      const validacionBasica = await pdfAnalysisService.validarPDFBasico(req.file.path);
+      if (!validacionBasica.valido) {
+        await fsPromises.unlink(req.file.path);
+        return res.status(400).json({
+          success: false,
+          error: 'PDF_INVALIDO',
+          message: validacionBasica.error || 'PDF no válido',
+          detalles: {
+            problemas: [validacionBasica.error || 'Archivo PDF no válido'],
+            sugerencias: [
+              'Asegúrate de que el archivo sea un PDF válido',
+              'Verifica que el tamaño no supere los 10MB',
+              'Intenta con otro archivo PDF'
+            ]
+          }
+        });
+      }
+
+      console.log('✅ PDF válido, procediendo con análisis de contenido...');
+
+      // Análisis de contenido textual
+      const resultadoAnalisis = await pdfAnalysisService.analizarTextoPDF(
+        req.file.path,
+        ipUsuario,
+        hashNavegador
+      );
+
+      // ✅ SI EL PDF ES RECHAZADO
+      if (!resultadoAnalisis.esAprobado) {
+        console.log('❌ PDF rechazado por moderación:', resultadoAnalisis.motivo);
+        
+        await fsPromises.unlink(req.file.path);
+        
+        return res.status(400).json({
+          success: false,
+          error: 'PDF_RECHAZADO',
+          message: 'El contenido del PDF no cumple con las políticas de moderación',
+          motivo: resultadoAnalisis.motivo,
+          tipo: 'pdf_texto',
+          detalles: {
+            puntuacion: resultadoAnalisis.puntuacion,
+            problemas: [resultadoAnalisis.motivo || 'Contenido inapropiado detectado'],
+            sugerencias: [
+              'Revisa que el PDF no contenga lenguaje ofensivo o inapropiado',
+              'Asegúrate de que el contenido sea apropiado para todos los públicos',
+              'Evita contenido promocional, spam o enlaces no permitidos'
+            ],
+            metadata: resultadoAnalisis.metadata
+          }
+        });
+      }
+
+      console.log('✅ PDF aprobado por moderación');
+
+      // Verificar que el lugar existe
+      const lugarResult = await pool.query(
+        'SELECT id, nombre FROM lugares WHERE id = $1',
+        [id]
+      );
+
+      if (lugarResult.rows.length === 0) {
+        await fsPromises.unlink(req.file.path);
+        return res.status(404).json({ 
+          success: false,
+          error: 'Lugar no encontrado' 
+        });
+      }
+
+      // 🆕 NUEVO: SUBIR A CLOUDINARY
+      const fileBuffer = await fsPromises.readFile(req.file.path);
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        req.file.filename,
+        process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs_lugares'
+      );
+
+      // 🆕 NUEVO: Limpiar archivo temporal
+      await fsPromises.unlink(req.file.path);
+
+      // 🆕 NUEVO: Actualizar BD con URL de Cloudinary
+      await pool.query(
+        'UPDATE lugares SET pdf_url = $1, actualizado_en = NOW() WHERE id = $2',
+        [cloudinaryResult.secure_url, id]  // ← URL de Cloudinary, no local
+      );
+
+      const lugar = lugarResult.rows[0];
+      console.log('✅ PDF subido y aprobado para lugar CON CLOUDINARY:', lugar.nombre);
+
+      res.json({
+        success: true,
+        mensaje: 'PDF subido y aprobado exitosamente',
+        url_pdf: cloudinaryResult.secure_url,  // ← URL de Cloudinary
+        moderacion: {
+          esAprobado: true,
           puntuacion: resultadoAnalisis.puntuacion,
-          problemas: [resultadoAnalisis.motivo || 'Contenido inapropiado detectado'],
-          sugerencias: [
-            'Revisa que el PDF no contenga lenguaje ofensivo o inapropiado',
-            'Asegúrate de que el contenido sea apropiado para todos los públicos',
-            'Evita contenido promocional, spam o enlaces no permitidos'
-          ],
           metadata: resultadoAnalisis.metadata
+        },
+        archivo: {
+          nombre: req.file.filename,
+          tamaño: req.file.size,
+          tipo: req.file.mimetype,
+          public_id: cloudinaryResult.public_id
+        },
+        cloudinary: {
+          public_id: cloudinaryResult.public_id,
+          folder: cloudinaryResult.folder,
+          resource_type: cloudinaryResult.resource_type
         }
       });
-    }
 
-    console.log('✅ PDF aprobado por moderación');
-
-    // Verificar que el lugar existe
-    const lugarResult = await pool.query(
-      'SELECT id, nombre FROM lugares WHERE id = $1',
-      [id]
-    );
-
-    if (lugarResult.rows.length === 0) {
-      await fsPromises.unlink(req.file.path);
-      return res.status(404).json({ 
+    } catch (error) {
+      console.error('❌ Error subiendo PDF con moderación:', error);
+      
+      if (req.file?.path) {
+        try {
+          await fsPromises.unlink(req.file.path);
+        } catch (unlinkError) {
+          console.error('Error eliminando archivo:', unlinkError);
+        }
+      }
+      
+      res.status(500).json({ 
         success: false,
-        error: 'Lugar no encontrado' 
+        error: 'Error al subir PDF',
+        detalle: error instanceof Error ? error.message : 'Error desconocido'
       });
     }
+  },
 
-    const rutaPDF = `/uploads/pdfs/${req.file.filename}`;
-
-    // Actualizar la base de datos
-    await pool.query(
-      'UPDATE lugares SET pdf_url = $1, actualizado_en = NOW() WHERE id = $2',
-      [rutaPDF, id]
-    );
-
-    const lugar = lugarResult.rows[0];
-    console.log('✅ PDF subido y aprobado para lugar:', lugar.nombre);
-
-    res.json({
-      success: true,
-      mensaje: 'PDF subido y aprobado exitosamente',
-      url_pdf: rutaPDF,
-      moderacion: {
-        esAprobado: true,
-        puntuacion: resultadoAnalisis.puntuacion,
-        metadata: resultadoAnalisis.metadata
-      },
-      archivo: {
-        nombre: req.file.filename,
-        tamaño: req.file.size,
-        tipo: req.file.mimetype
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error subiendo PDF con moderación:', error);
-    
-    // Limpiar archivo en caso de error
-    if (req.file?.path) {
-      try {
-        await fsPromises.unlink(req.file.path);
-      } catch (unlinkError) {
-        console.error('Error eliminando archivo:', unlinkError);
-      }
-    }
-    
-    res.status(500).json({ 
-      success: false,
-      error: 'Error al subir PDF',
-      detalle: error instanceof Error ? error.message : 'Error desconocido'
-    });
-  }
-},
 
   // Obtener galería de imágenes de un lugar - SIN CAMBIOS
   async obtenerGaleriaLugar(req: Request, res: Response) {
@@ -2095,8 +2167,12 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
     }
   },
 
-  // Eliminar imagen de la galería - SIN CAMBIOS
+  /**
+   * ✅ ACTUALIZADO: Eliminar imagen de la galería CON Cloudinary
+   */
   async eliminarImagenGaleria(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
     try {
       const { id, imagenId } = req.params;
 
@@ -2107,23 +2183,29 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
       );
 
       if (imagenResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Imagen no encontrada o no pertenece al lugar' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Imagen no encontrada o no pertenece al lugar' 
+        });
       }
 
       const imagen = imagenResult.rows[0];
 
       // No permitir eliminar la imagen principal
       if (imagen.es_principal) {
-        return res.status(400).json({ error: 'No se puede eliminar la imagen principal' });
+        return res.status(400).json({ 
+          success: false,
+          error: 'No se puede eliminar la imagen principal' 
+        });
       }
 
-      // ✅ CORREGIDO: Eliminar el archivo físico usando fsPromises
-      if (imagen.ruta_almacenamiento) {
+      // 🆕 NUEVO: Eliminar de Cloudinary si es una URL de Cloudinary
+      if (imagen.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(imagen.url_foto)) {
         try {
-          await fsPromises.access(imagen.ruta_almacenamiento);
-          await fsPromises.unlink(imagen.ruta_almacenamiento);
+          await cloudinaryService.eliminarArchivo(imagen.ruta_almacenamiento);
+          console.log('🗑️ Imagen eliminada de Cloudinary:', imagen.ruta_almacenamiento);
         } catch (error) {
-          console.log('Archivo no encontrado o no se pudo eliminar:', error);
+          console.warn('⚠️ No se pudo eliminar la imagen de Cloudinary:', error);
         }
       }
 
@@ -2133,13 +2215,18 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
         [imagenId]
       );
 
-      res.json({ mensaje: 'Imagen eliminada exitosamente' });
+      res.json({ 
+        success: true,
+        mensaje: 'Imagen eliminada exitosamente' 
+      });
     } catch (error) {
       console.error('Error eliminando imagen:', error);
-      res.status(500).json({ error: 'Error al eliminar imagen' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al eliminar imagen' 
+      });
     }
   },
-
   // Establecer imagen como principal - SIN CAMBIOS
   async establecerImagenPrincipal(req: Request, res: Response) {
     try {
@@ -2470,8 +2557,12 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
     }
   },
 
-  // Eliminar imagen principal (con lógica de reemplazo) - CORREGIDO
+  /**
+   * ✅ ACTUALIZADO: Eliminar imagen principal CON Cloudinary
+   */
   async eliminarImagenPrincipal(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
     try {
       const { id } = req.params;
 
@@ -2482,10 +2573,23 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
       );
 
       if (imagenPrincipalResult.rows.length === 0) {
-        return res.status(404).json({ error: 'No se encontró imagen principal' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'No se encontró imagen principal' 
+        });
       }
 
       const imagenPrincipal = imagenPrincipalResult.rows[0];
+
+      // 🆕 NUEVO: Eliminar imagen de Cloudinary
+      if (imagenPrincipal.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(imagenPrincipal.url_foto)) {
+        try {
+          await cloudinaryService.eliminarArchivo(imagenPrincipal.ruta_almacenamiento);
+          console.log('🗑️ Imagen principal eliminada de Cloudinary:', imagenPrincipal.ruta_almacenamiento);
+        } catch (error) {
+          console.warn('⚠️ No se pudo eliminar la imagen principal de Cloudinary:', error);
+        }
+      }
 
       // Buscar una imagen alternativa para establecer como principal
       const imagenesAlternativas = await pool.query(
@@ -2517,16 +2621,6 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
         );
       }
 
-      // ✅ CORREGIDO: Eliminar el archivo físico usando fsPromises
-      if (imagenPrincipal.ruta_almacenamiento) {
-        try {
-          await fsPromises.access(imagenPrincipal.ruta_almacenamiento);
-          await fsPromises.unlink(imagenPrincipal.ruta_almacenamiento);
-        } catch (error) {
-          console.log('Archivo no encontrado o no se pudo eliminar:', error);
-        }
-      }
-
       // Eliminar de la base de datos
       await pool.query(
         'DELETE FROM fotos_lugares WHERE id = $1',
@@ -2534,6 +2628,7 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
       );
 
       res.json({
+        success: true,
         mensaje: 'Imagen principal eliminada exitosamente',
         nueva_imagen_principal: nuevaImagenPrincipal ? {
           id: nuevaImagenPrincipal.id,
@@ -2542,12 +2637,18 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
       });
     } catch (error) {
       console.error('Error eliminando imagen principal:', error);
-      res.status(500).json({ error: 'Error al eliminar imagen principal' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al eliminar imagen principal' 
+      });
     }
   },
-
-  // Eliminar PDF de lugar - CORREGIDO
+ /**
+   * ✅ ACTUALIZADO: Eliminar PDF de lugar CON Cloudinary
+   */
   async eliminarPDFLugar(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+    
     try {
       const { id } = req.params;
 
@@ -2558,19 +2659,36 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
       );
 
       if (lugarResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Lugar no encontrado' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Lugar no encontrado' 
+        });
       }
 
       const lugar = lugarResult.rows[0];
 
-      // ✅ CORREGIDO: Si existe un PDF, eliminar el archivo físico usando fsPromises
-      if (lugar.pdf_url) {
+      // ✅ MEJORADO: Si existe un PDF en Cloudinary, eliminarlo de allí
+      if (lugar.pdf_url && cloudinaryService.esUrlCloudinary(lugar.pdf_url)) {
+        try {
+          // Extraer public_id de la URL de Cloudinary
+          const publicId = cloudinaryService.extraerPublicId(lugar.pdf_url);
+          if (publicId) {
+            await cloudinaryService.eliminarArchivo(publicId);
+            console.log('🗑️ PDF eliminado de Cloudinary:', publicId);
+          }
+        } catch (error) {
+          console.warn('⚠️ No se pudo eliminar el PDF de Cloudinary:', error);
+        }
+      } 
+      // ✅ MANTENER: Compatibilidad con archivos locales (por si acaso)
+      else if (lugar.pdf_url && lugar.pdf_url.startsWith('/uploads/')) {
         const pdfPath = path.join(__dirname, '..', '..', lugar.pdf_url);
         try {
           await fsPromises.access(pdfPath);
           await fsPromises.unlink(pdfPath);
+          console.log('🗑️ PDF local eliminado:', pdfPath);
         } catch (error) {
-          console.log('Archivo PDF no encontrado o no se pudo eliminar:', error);
+          console.log('Archivo PDF local no encontrado o no se pudo eliminar:', error);
         }
       }
 
@@ -2581,249 +2699,239 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
       );
 
       res.json({ 
+        success: true,
         mensaje: 'PDF eliminado exitosamente'
       });
     } catch (error) {
       console.error('Error eliminando PDF:', error);
-      res.status(500).json({ error: 'Error al eliminar PDF' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al eliminar PDF' 
+      });
     }
   },
 
-/**
- * ✅ ACTUALIZADO: Reemplazar imagen principal CON moderación (igual que experiencias)
- */
-async reemplazarImagenPrincipal(req: Request, res: Response) {
-  const client = await pool.connect();
-  
-  try {
-    const { id } = req.params;
+ /**
+   * ✅ ACTUALIZADO: Reemplazar imagen principal CON Cloudinary
+   */
+  async reemplazarImagenPrincipal(req: Request, res: Response) {
+    const client = await pool.connect();
+    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
     
-    console.log('🔄 Reemplazando imagen principal para lugar con moderación:', id);
-
-    if (!req.file) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Archivo es requerido' 
-      });
-    }
-
-    // ✅ NUEVO: Moderación de imagen (igual que en experiencias)
-    const hashNavegador = generarHashNavegador(req);
-    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-
-    const moderacionImagenService = new ModeracionImagenService();
-    
-    const resultadoModeracion = await moderacionImagenService.moderarImagenLugar(
-      req.file.path,
-      ipUsuario,
-      hashNavegador
-    );
-
-    if (!resultadoModeracion.esAprobado) {
-      console.log('❌ Imagen rechazada por moderación:', resultadoModeracion.motivoRechazo);
+    try {
+      const { id } = req.params;
       
-      // ✅ CORREGIDO: Eliminar archivo subido usando fsPromises
-      try {
-        await fsPromises.unlink(req.file.path);
-      } catch (error) {
-        console.error('Error eliminando archivo:', error);
+      console.log('🔄 Reemplazando imagen principal para lugar con moderación y Cloudinary:', id);
+
+      if (!req.file) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'Archivo es requerido' 
+        });
       }
+
+      // ✅ NUEVO: Moderación de imagen
+      const hashNavegador = generarHashNavegador(req);
+      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+      const moderacionImagenService = new ModeracionImagenService();
       
-      // controladores/lugarController.ts - CORREGIR estructura de error
+      // 🆕 NUEVO: Leer y moderar desde buffer
+      const fileBuffer = await fsPromises.readFile(req.file.path);
+      const resultadoModeracion = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        req.file.filename,
+        ipUsuario,
+        hashNavegador
+      );
 
-return res.status(400).json({
-  success: false,
-  error: 'IMAGEN_RECHAZADA', // ← Tipo de error consistente
-  message: 'La imagen no cumple con las políticas de contenido', // ← Mensaje para usuario
-  motivo: resultadoModeracion.motivoRechazo, // ← Motivo técnico
-  tipo: 'imagen', // ← Tipo de contenido
-  detalles: {
-    puntuacion: resultadoModeracion.puntuacionRiesgo,
-    problemas: [resultadoModeracion.motivoRechazo || 'Contenido inapropiado detectado'],
-    sugerencias: generarSugerenciasLugar('imagen'),
-    timestamp: new Date().toISOString()
-  }
-});
-    }
-
-    console.log('✅ Imagen aprobada para reemplazar imagen principal');
-
-    await client.query('BEGIN');
-
-    // El resto del código permanece igual...
-    // 1. Verificar que el lugar existe
-    const lugarResult = await client.query(
-      'SELECT id, nombre FROM lugares WHERE id = $1',
-      [id]
-    );
-
-    if (lugarResult.rows.length === 0) {
-      // ✅ CORREGIDO: Usar fsPromises.unlink
-      if (req.file.path) {
+      if (!resultadoModeracion.esAprobado) {
+        console.log('❌ Imagen rechazada por moderación:', resultadoModeracion.motivoRechazo);
+        
+        // Eliminar archivo subido
         try {
           await fsPromises.unlink(req.file.path);
         } catch (error) {
           console.error('Error eliminando archivo:', error);
         }
+        
+        return res.status(400).json({
+          success: false,
+          error: 'IMAGEN_RECHAZADA',
+          message: 'La imagen no cumple con las políticas de contenido',
+          motivo: resultadoModeracion.motivoRechazo,
+          tipo: 'imagen',
+          detalles: {
+            puntuacion: resultadoModeracion.puntuacionRiesgo,
+            problemas: [resultadoModeracion.motivoRechazo || 'Contenido inapropiado detectado'],
+            sugerencias: generarSugerenciasLugar('imagen'),
+            timestamp: new Date().toISOString()
+          }
+        });
       }
-      await client.query('ROLLBACK');
-      return res.status(404).json({ 
-        success: false,
-        error: 'Lugar no encontrado' 
-      });
-    }
 
-    const lugar = lugarResult.rows[0];
-    const rutaRelativa = `/uploads/images/lugares/${req.file.filename}`;
-    
-    console.log('📍 Reemplazando imagen principal para:', lugar.nombre);
+      console.log('✅ Imagen aprobada para reemplazar imagen principal');
 
-    // 2. Obtener la imagen principal actual
-    const imagenPrincipalActual = await client.query(
-      'SELECT id, ruta_almacenamiento FROM fotos_lugares WHERE lugar_id = $1 AND es_principal = true',
-      [id]
-    );
+      await client.query('BEGIN');
 
-    let imagenActualId: string | null = null;
+      // 1. Verificar que el lugar existe
+      const lugarResult = await client.query(
+        'SELECT id, nombre FROM lugares WHERE id = $1',
+        [id]
+      );
 
-    if (imagenPrincipalActual.rows.length > 0) {
-      // 3. Reemplazar imagen principal existente
-      const imagenActual = imagenPrincipalActual.rows[0];
-      imagenActualId = imagenActual.id;
+      if (lugarResult.rows.length === 0) {
+        // Eliminar archivo si el lugar no existe
+        if (req.file.path) {
+          try {
+            await fsPromises.unlink(req.file.path);
+          } catch (error) {
+            console.error('Error eliminando archivo:', error);
+          }
+        }
+        await client.query('ROLLBACK');
+        return res.status(404).json({ 
+          success: false,
+          error: 'Lugar no encontrado' 
+        });
+      }
+
+      const lugar = lugarResult.rows[0];
       
-      console.log('📸 Imagen principal actual encontrada:', imagenActualId);
+      // 🆕 NUEVO: Subir a Cloudinary
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        req.file.filename,
+        process.env.CLOUDINARY_LUGARES_FOLDER || 'lugares'
+      );
 
-      // ✅ CORREGIDO: Eliminar archivo anterior usando fsPromises
-      if (imagenActual.ruta_almacenamiento) {
-        try {
-          await fsPromises.access(imagenActual.ruta_almacenamiento);
-          await fsPromises.unlink(imagenActual.ruta_almacenamiento);
-        } catch (error) {
-          console.log('Archivo anterior no encontrado o no se pudo eliminar:', error);
+      // 🆕 NUEVO: Limpiar archivo temporal
+      await fsPromises.unlink(req.file.path);
+
+      console.log('📍 Reemplazando imagen principal para:', lugar.nombre);
+
+      // 2. Obtener la imagen principal actual
+      const imagenPrincipalActual = await client.query(
+        'SELECT id, ruta_almacenamiento FROM fotos_lugares WHERE lugar_id = $1 AND es_principal = true',
+        [id]
+      );
+
+      let imagenActualId: string | null = null;
+
+      if (imagenPrincipalActual.rows.length > 0) {
+        // 3. Reemplazar imagen principal existente
+        const imagenActual = imagenPrincipalActual.rows[0];
+        imagenActualId = imagenActual.id;
+        
+        console.log('📸 Imagen principal actual encontrada:', imagenActualId);
+
+        // 🆕 NUEVO: Eliminar imagen anterior de Cloudinary
+        if (imagenActual.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(imagenActual.ruta_almacenamiento)) {
+          try {
+            await cloudinaryService.eliminarArchivo(imagenActual.ruta_almacenamiento);
+            console.log('🗑️ Imagen anterior eliminada de Cloudinary');
+          } catch (error) {
+            console.warn('⚠️ No se pudo eliminar la imagen anterior de Cloudinary:', error);
+          }
+        }
+
+        // Actualizar la imagen existente (manteniendo es_principal = true)
+        await client.query(
+          `UPDATE fotos_lugares 
+           SET url_foto = $1, 
+               ruta_almacenamiento = $2, 
+               tamaño_archivo = $3, 
+               tipo_archivo = $4,
+               ancho_imagen = $5,
+               alto_imagen = $6,
+               actualizado_en = NOW()
+           WHERE id = $7`,
+          [
+            cloudinaryResult.secure_url,
+            cloudinaryResult.public_id,
+            cloudinaryResult.bytes,
+            `image/${cloudinaryResult.format}`,
+            cloudinaryResult.width || null,
+            cloudinaryResult.height || null,
+            imagenActualId
+          ]
+        );
+        
+      } else {
+        // 4. Crear nueva imagen principal si no existe
+        console.log('➕ Creando nueva imagen principal...');
+        
+        const result = await client.query(
+          `INSERT INTO fotos_lugares 
+           (lugar_id, url_foto, es_principal, descripcion, orden, 
+            ruta_almacenamiento, tamaño_archivo, tipo_archivo, ancho_imagen, alto_imagen)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING id`,
+          [
+            id,
+            cloudinaryResult.secure_url,
+            true,
+            'Imagen principal del lugar',
+            1,
+            cloudinaryResult.public_id,
+            cloudinaryResult.bytes,
+            `image/${cloudinaryResult.format}`,
+            cloudinaryResult.width || null,
+            cloudinaryResult.height || null
+          ]
+        );
+        
+        imagenActualId = result.rows[0].id;
+      }
+
+      // 5. Actualizar la foto_principal_url en la tabla lugares
+      await client.query(
+        'UPDATE lugares SET foto_principal_url = $1, actualizado_en = NOW() WHERE id = $2',
+        [cloudinaryResult.secure_url, id]
+      );
+
+      await client.query('COMMIT');
+      console.log('✅ Imagen principal reemplazada y aprobada exitosamente en Cloudinary');
+
+      res.json({
+        success: true,
+        mensaje: 'Imagen principal reemplazada exitosamente',
+        url_imagen: cloudinaryResult.secure_url,
+        imagen_id: imagenActualId,
+        es_principal: true,
+        moderacion: {
+          esAprobado: true,
+          puntuacionRiesgo: resultadoModeracion.puntuacionRiesgo,
+          timestamp: new Date().toISOString()
+        },
+        archivo: {
+          nombre: req.file.filename,
+          tamaño: cloudinaryResult.bytes,
+          tipo: `image/${cloudinaryResult.format}`
+        }
+      });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Error reemplazando imagen principal:', error);
+      
+      if (req.file?.path) {
+        try { 
+          await fsPromises.unlink(req.file.path); 
+        } catch (unlinkError) { 
+          console.error('Error eliminando archivo:', unlinkError);
         }
       }
-
-      // Obtener dimensiones
-      let anchoImagen: number | null = null;
-      let altoImagen: number | null = null;
       
-      try {
-        const metadata = await sharp(req.file.path).metadata();
-        anchoImagen = metadata.width || null;
-        altoImagen = metadata.height || null;
-      } catch (sharpError) {
-        console.warn('⚠️ No se pudieron obtener dimensiones:', sharpError);
-      }
-
-      // Actualizar la imagen existente (manteniendo es_principal = true)
-      await client.query(
-        `UPDATE fotos_lugares 
-         SET url_foto = $1, 
-             ruta_almacenamiento = $2, 
-             tamaño_archivo = $3, 
-             tipo_archivo = $4,
-             ancho_imagen = $5,
-             alto_imagen = $6,
-             actualizado_en = NOW()
-         WHERE id = $7`,
-        [
-          rutaRelativa, 
-          req.file.path, 
-          req.file.size, 
-          req.file.mimetype,
-          anchoImagen,
-          altoImagen,
-          imagenActualId
-        ]
-      );
-      
-    } else {
-      // 4. Crear nueva imagen principal si no existe
-      console.log('➕ Creando nueva imagen principal...');
-      
-      let anchoImagen: number | null = null;
-      let altoImagen: number | null = null;
-      
-      try {
-        const metadata = await sharp(req.file.path).metadata();
-        anchoImagen = metadata.width || null;
-        altoImagen = metadata.height || null;
-      } catch (sharpError) {
-        console.warn('⚠️ No se pudieron obtener dimensiones:', sharpError);
-      }
-
-      const result = await client.query(
-        `INSERT INTO fotos_lugares 
-         (lugar_id, url_foto, es_principal, descripcion, orden, 
-          ruta_almacenamiento, tamaño_archivo, tipo_archivo, ancho_imagen, alto_imagen)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING id`,
-        [
-          id,
-          rutaRelativa,
-          true,
-          'Imagen principal del lugar',
-          1,
-          req.file.path,
-          req.file.size,
-          req.file.mimetype,
-          anchoImagen,
-          altoImagen
-        ]
-      );
-      
-      imagenActualId = result.rows[0].id;
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al reemplazar imagen principal',
+        detalle: error instanceof Error ? error.message : 'Error desconocido'
+      });
+    } finally {
+      client.release();
     }
-
-    // 5. Actualizar la foto_principal_url en la tabla lugares
-    await client.query(
-      'UPDATE lugares SET foto_principal_url = $1, actualizado_en = NOW() WHERE id = $2',
-      [rutaRelativa, id]
-    );
-
-    await client.query('COMMIT');
-    console.log('✅ Imagen principal reemplazada y aprobada exitosamente');
-
-    res.json({
-      success: true,
-      mensaje: 'Imagen principal reemplazada exitosamente',
-      url_imagen: rutaRelativa,
-      imagen_id: imagenActualId,
-      es_principal: true,
-      moderacion: {
-        esAprobado: true,
-        puntuacionRiesgo: resultadoModeracion.puntuacionRiesgo,
-        timestamp: new Date().toISOString()
-      },
-      archivo: {
-        nombre: req.file.filename,
-        tamaño: req.file.size,
-        tipo: req.file.mimetype
-      }
-    });
-
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('❌ Error reemplazando imagen principal:', error);
-    
-    if (req.file?.path) {
-      try { 
-        await fsPromises.unlink(req.file.path); 
-      } catch (unlinkError) { 
-        console.error('Error eliminando archivo:', unlinkError);
-      }
-    }
-    
-    res.status(500).json({ 
-      success: false,
-      error: 'Error al reemplazar imagen principal',
-      detalle: error instanceof Error ? error.message : 'Error desconocido'
-    });
-  } finally {
-    client.release();
-  }
-},
-
+  },
   // 🔒 MÉTODOS PRIVADOS - Actualizados para solo texto
 
 /**

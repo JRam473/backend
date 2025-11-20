@@ -77,7 +77,7 @@ export class PdfConversionService {
         savePath: this.tempDir,
         format: "png",
         width: 1200,
-        height: 1600
+        height: 1600 
       };
       
       const convert = fromPath(pdfPath, options);

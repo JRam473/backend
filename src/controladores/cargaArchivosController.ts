@@ -1,13 +1,14 @@
-//contrladore/cargaArchivosController.ts
+// controladores/cargaArchivosController.ts - VERSIÓN CORREGIDA
 import { Request, Response } from 'express';
 import { pool } from '../utils/baseDeDatos';
-import path from 'path';
-import fs from 'fs';
-import sharp from 'sharp'; // Necesario para obtener dimensiones de imagen
+import fs from 'fs/promises';
+import { CloudinaryService } from '../services/cloudinaryService';
 
 export const cargaArchivosController = {
   // Subir foto para lugar (admin only)
   async subirFotoLugar(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService();
+    
     try {
       if (!req.file) {
         return res.status(400).json({ error: 'No se proporcionó archivo' });
@@ -22,27 +23,22 @@ export const cargaArchivosController = {
       );
       
       if (lugarResult.rows.length === 0) {
-        // Eliminar archivo subido si el lugar no existe
-        fs.unlinkSync(req.file.path);
+        await fs.unlink(req.file.path);
         return res.status(404).json({ error: 'Lugar no encontrado' });
       }
 
-      // Obtener dimensiones de la imagen usando sharp
-      let anchoImagen: number | null = null;
-      let altoImagen: number | null = null;
-      
-      try {
-        const metadata = await sharp(req.file.path).metadata();
-        anchoImagen = metadata.width || null;
-        altoImagen = metadata.height || null;
-      } catch (sharpError) {
-        console.warn('No se pudieron obtener las dimensiones de la imagen:', sharpError);
-      }
+      // Leer archivo y subir a Cloudinary
+      const fileBuffer = await fs.readFile(req.file.path);
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        req.file.filename,
+        process.env.CLOUDINARY_LUGARES_FOLDER || 'lugares'
+      );
 
-      // Ruta relativa para acceso web
-      const rutaRelativa = `/uploads/images/lugares/${req.file.filename}`;
-      
-      // Obtener el máximo orden actual para este lugar
+      // Limpiar archivo local
+      await fs.unlink(req.file.path);
+
+      // Obtener el máximo orden actual
       const ordenResult = await pool.query(
         'SELECT COALESCE(MAX(orden), 0) + 1 as siguiente_orden FROM fotos_lugares WHERE lugar_id = $1',
         [lugarId]
@@ -56,27 +52,26 @@ export const cargaArchivosController = {
          RETURNING *`,
         [
           lugarId,
-          rutaRelativa,
-          req.file.path,
+          cloudinaryResult.secure_url,
+          cloudinaryResult.public_id,
           descripcion || '',
           esPrincipal === 'true',
           ordenResult.rows[0].siguiente_orden,
-          anchoImagen,
-          altoImagen,
-          req.file.size,
+          cloudinaryResult.width,    // ← number | null (compatible)
+          cloudinaryResult.height,   // ← number | null (compatible)
+          cloudinaryResult.bytes,
           req.file.mimetype
         ]
       );
 
       res.status(201).json({
-        mensaje: 'Foto subida exitosamente',
+        mensaje: 'Foto subida exitosamente a Cloudinary',
         foto: result.rows[0]
       });
     } catch (error) {
-      console.error('Error subiendo foto:', error);
-      // Limpiar archivo en caso de error
+      console.error('Error subiendo foto a Cloudinary:', error);
       if (req.file) {
-        fs.unlinkSync(req.file.path);
+        await fs.unlink(req.file.path).catch(console.error);
       }
       res.status(500).json({ error: 'Error al subir foto' });
     }
@@ -84,6 +79,8 @@ export const cargaArchivosController = {
 
   // Subir PDF para lugar (admin only)
   async subirPDFLugar(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService();
+    
     try {
       if (!req.file) {
         return res.status(400).json({ error: 'No se proporcionó archivo PDF' });
@@ -98,20 +95,27 @@ export const cargaArchivosController = {
       );
       
       if (lugarResult.rows.length === 0) {
-        // Eliminar archivo subido si el lugar no existe
-        fs.unlinkSync(req.file.path);
+        await fs.unlink(req.file.path);
         return res.status(404).json({ error: 'Lugar no encontrado' });
       }
 
-      // Ruta relativa para acceso web
-      const rutaRelativa = `/uploads/pdfs/${req.file.filename}`;
+      // Leer archivo y subir a Cloudinary
+      const fileBuffer = await fs.readFile(req.file.path);
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        req.file.filename,
+        process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs'
+      );
 
-      // Si ya existe un PDF, eliminarlo físicamente
+      // Limpiar archivo local
+      await fs.unlink(req.file.path);
+
+      // Si ya existe un PDF en Cloudinary, eliminarlo
       const lugar = lugarResult.rows[0];
-      if (lugar.pdf_url) {
-        const rutaAnterior = path.join(__dirname, '../../', lugar.pdf_url);
-        if (fs.existsSync(rutaAnterior)) {
-          fs.unlinkSync(rutaAnterior);
+      if (lugar.pdf_url && cloudinaryService.esUrlCloudinary(lugar.pdf_url)) {
+        const publicId = cloudinaryService.extraerPublicId(lugar.pdf_url);
+        if (publicId) {
+          await cloudinaryService.eliminarArchivo(publicId).catch(console.error);
         }
       }
 
@@ -120,18 +124,17 @@ export const cargaArchivosController = {
          SET pdf_url = $1, actualizado_en = NOW()
          WHERE id = $2
          RETURNING *`,
-        [rutaRelativa, lugarId]
+        [cloudinaryResult.secure_url, lugarId]
       );
 
       res.status(201).json({
-        mensaje: 'PDF subido exitosamente',
+        mensaje: 'PDF subido exitosamente a Cloudinary',
         lugar: result.rows[0]
       });
     } catch (error) {
-      console.error('Error subiendo PDF:', error);
-      // Limpiar archivo en caso de error
+      console.error('Error subiendo PDF a Cloudinary:', error);
       if (req.file) {
-        fs.unlinkSync(req.file.path);
+        await fs.unlink(req.file.path).catch(console.error);
       }
       res.status(500).json({ error: 'Error al subir PDF' });
     }
@@ -139,6 +142,8 @@ export const cargaArchivosController = {
 
   // Eliminar PDF de lugar (admin only)
   async eliminarPDFLugar(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService();
+    
     try {
       const { lugarId } = req.params;
 
@@ -153,11 +158,11 @@ export const cargaArchivosController = {
 
       const lugar = result.rows[0];
       
-      // Eliminar archivo físico si existe
-      if (lugar.pdf_url) {
-        const rutaPDF = path.join(__dirname, '../../', lugar.pdf_url);
-        if (fs.existsSync(rutaPDF)) {
-          fs.unlinkSync(rutaPDF);
+      // Eliminar archivo de Cloudinary si existe
+      if (lugar.pdf_url && cloudinaryService.esUrlCloudinary(lugar.pdf_url)) {
+        const publicId = cloudinaryService.extraerPublicId(lugar.pdf_url);
+        if (publicId) {
+          await cloudinaryService.eliminarArchivo(publicId);
         }
       }
 
@@ -167,15 +172,17 @@ export const cargaArchivosController = {
         [lugarId]
       );
 
-      res.json({ mensaje: 'PDF eliminado exitosamente' });
+      res.json({ mensaje: 'PDF eliminado exitosamente de Cloudinary' });
     } catch (error) {
-      console.error('Error eliminando PDF:', error);
+      console.error('Error eliminando PDF de Cloudinary:', error);
       res.status(500).json({ error: 'Error al eliminar PDF' });
     }
   },
 
   // Subir experiencia (público)
   async subirExperiencia(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService();
+    
     try {
       if (!req.file) {
         return res.status(400).json({ error: 'No se proporcionó imagen' });
@@ -183,20 +190,16 @@ export const cargaArchivosController = {
 
       const { descripcion, lugarId } = req.body;
 
-      // Obtener dimensiones de la imagen usando sharp
-      let anchoImagen: number | null = null;
-      let altoImagen: number | null = null;
-      
-      try {
-        const metadata = await sharp(req.file.path).metadata();
-        anchoImagen = metadata.width || null;
-        altoImagen = metadata.height || null;
-      } catch (sharpError) {
-        console.warn('No se pudieron obtener las dimensiones de la imagen:', sharpError);
-      }
+      // Leer archivo y subir a Cloudinary
+      const fileBuffer = await fs.readFile(req.file.path);
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        req.file.filename,
+        process.env.CLOUDINARY_EXPERIENCIAS_FOLDER || 'experiencias'
+      );
 
-      // Ruta relativa para acceso web
-      const rutaRelativa = `/uploads/images/experiencias/${req.file.filename}`;
+      // Limpiar archivo local
+      await fs.unlink(req.file.path);
 
       const result = await pool.query(
         `INSERT INTO experiencias 
@@ -205,26 +208,25 @@ export const cargaArchivosController = {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente')
          RETURNING *`,
         [
-          rutaRelativa,
+          cloudinaryResult.secure_url,
           descripcion || '',
-          req.file.path,
+          cloudinaryResult.public_id,
           lugarId || null,
-          anchoImagen,
-          altoImagen,
-          req.file.size,
+          cloudinaryResult.width,    // ← number | null (compatible)
+          cloudinaryResult.height,   // ← number | null (compatible)
+          cloudinaryResult.bytes,
           req.file.mimetype
         ]
       );
 
       res.status(201).json({
-        mensaje: 'Experiencia subida exitosamente. En proceso de moderación.',
+        mensaje: 'Experiencia subida exitosamente a Cloudinary. En proceso de moderación.',
         experiencia: result.rows[0]
       });
     } catch (error) {
-      console.error('Error subiendo experiencia:', error);
-      // Limpiar archivo en caso de error
+      console.error('Error subiendo experiencia a Cloudinary:', error);
       if (req.file) {
-        fs.unlinkSync(req.file.path);
+        await fs.unlink(req.file.path).catch(console.error);
       }
       res.status(500).json({ error: 'Error al subir experiencia' });
     }
@@ -232,6 +234,8 @@ export const cargaArchivosController = {
 
   // Eliminar foto de lugar (admin only)
   async eliminarFotoLugar(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService();
+    
     try {
       const { fotoId } = req.params;
 
@@ -246,19 +250,20 @@ export const cargaArchivosController = {
 
       const foto = result.rows[0];
       
-      // Eliminar archivo físico
-      if (fs.existsSync(foto.ruta_almacenamiento)) {
-        fs.unlinkSync(foto.ruta_almacenamiento);
+      // Eliminar archivo de Cloudinary si es una URL de Cloudinary
+      if (foto.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(foto.url_foto)) {
+        const publicId = cloudinaryService.extraerPublicId(foto.url_foto) || foto.ruta_almacenamiento;
+        await cloudinaryService.eliminarArchivo(publicId);
       }
 
-      res.json({ mensaje: 'Foto eliminada exitosamente' });
+      res.json({ mensaje: 'Foto eliminada exitosamente de Cloudinary' });
     } catch (error) {
-      console.error('Error eliminando foto:', error);
+      console.error('Error eliminando foto de Cloudinary:', error);
       res.status(500).json({ error: 'Error al eliminar foto' });
     }
   },
 
-  // Marcar foto como principal (admin only)
+  // Marcar foto como principal (sin cambios)
   async marcarFotoPrincipal(req: Request, res: Response) {
     try {
       const { fotoId } = req.params;
