@@ -1,5 +1,5 @@
 // backend/src/utils/analizadorTexto.ts - VERSIÓN CON ANÁLISIS DE COHERENCIA MEJORADO
-import { AnalisisTexto } from '../types/moderacion';
+import { AnalisisTexto } from '../types/moderacion.js';
 import axios from 'axios';
 
 // Configuración de Perspective API

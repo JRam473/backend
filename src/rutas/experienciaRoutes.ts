@@ -1,8 +1,8 @@
 // ✅ rutas/experienciaRoutes.ts (VERSIÓN ACTUALIZADA CON MODERACIÓN)
 import { Router } from 'express';
-import { experienciaController } from '../controladores/experienciaController';
-import { uploadExperienciaMiddleware } from '../utils/multerExperiencias'; // ✅ CORREGIDO: usar el middleware correcto
-import { moderacionEnTiempoReal } from '../middleware/moderacionEnTiempoReal';
+import { experienciaController } from '../controladores/experienciaController.js';
+import { uploadExperienciaMiddleware } from '../utils/multerExperiencias.js'; // ✅ CORREGIDO: usar el middleware correcto
+import { moderacionEnTiempoReal } from '../middleware/moderacionEnTiempoReal.js';
 
 const router = Router();
 

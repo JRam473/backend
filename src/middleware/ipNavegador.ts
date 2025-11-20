@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { generarHashNavegador } from '../utils/hashNavegador';
+import { generarHashNavegador } from '../utils/hashNavegador.js';
 
 // Extender la interfaz Request localmente
 declare module 'express' {

@@ -1,9 +1,9 @@
 // controladores/experienciaController.ts - VERSIÓN CLOUDINARY
-import { pool } from '../utils/baseDeDatos';
-import { generarHashNavegador } from '../utils/hashNavegador';
-import { ModeracionService } from '../services/moderacionService';
-import { ModeracionImagenService } from '../services/moderacionImagenService';
-import { CloudinaryService } from '../services/cloudinaryService'; // 🆕 NUEVO
+import { pool } from '../utils/baseDeDatos.js';
+import { generarHashNavegador } from '../utils/hashNavegador.js';
+import { ModeracionService } from '../services/moderacionService.js';
+import { ModeracionImagenService } from '../services/moderacionImagenService.js';
+import { CloudinaryService } from '../services/cloudinaryService.js'; // 🆕 NUEVO
 import { Request, Response } from 'express';
 import fs from 'fs/promises';
 

@@ -1,8 +1,8 @@
 // backend/src/controladores/moderacionController.ts
 import { Request, Response } from 'express';
-import { ModeracionImagenService } from '../services/moderacionImagenService';
-import { pool } from '../utils/baseDeDatos';
-import { generarHashNavegador } from '../utils/hashNavegador';
+import { ModeracionImagenService } from '../services/moderacionImagenService.js';
+import { pool } from '../utils/baseDeDatos.js';
+import { generarHashNavegador } from '../utils/hashNavegador.js';
 import fs from 'fs/promises';
 
 export const moderacionController = {

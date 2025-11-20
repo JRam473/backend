@@ -1,14 +1,13 @@
 // controladores/lugarController.ts - VERSIÓN CLOUDINARY
 import { Request, Response } from 'express';
-import { pool } from '../utils/baseDeDatos';
+import { pool } from '../utils/baseDeDatos.js';
 import { promises as fsPromises } from 'fs';
-import sharp from 'sharp';
 import path from 'path';
-import { ModeracionService } from '../services/moderacionService';
-import { generarHashNavegador } from '../utils/hashNavegador';
-import { ModeracionImagenService } from '../services/moderacionImagenService';
-import { PdfAnalysisService } from '../services/pdfAnalysisService';
-import { CloudinaryService } from '../services/cloudinaryService'; // 🆕 NUEVO
+import { ModeracionService } from '../services/moderacionService.js';
+import { generarHashNavegador } from '../utils/hashNavegador.js';
+import { ModeracionImagenService } from '../services/moderacionImagenService.js';
+import { PdfAnalysisService } from '../services/pdfAnalysisService.js';
+import { CloudinaryService } from '../services/cloudinaryService.js'; // 🆕 NUEVO
 
 
 const generarSugerenciasLugar = (tipoProblema: string): string[] => {

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import { pool } from '../utils/baseDeDatos';
-import { generarToken } from '../utils/jwt';
+import { pool } from '../utils/baseDeDatos.js';
+import { generarToken } from '../utils/jwt.js';
 
 export const autenticacionController = {
   async callbackGoogle(req: Request, res: Response) {

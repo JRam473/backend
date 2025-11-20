@@ -1,7 +1,7 @@
 //controladores/calificacionController.ts
 import { Request, Response } from 'express';
-import { pool } from '../utils/baseDeDatos';
-import { generarHashNavegador } from '../utils/hashNavegador';
+import { pool } from '../utils/baseDeDatos.js';
+import { generarHashNavegador } from '../utils/hashNavegador.js';
 
 export const calificacionController = {
   // Calificar lugar con control por IP/Navegador

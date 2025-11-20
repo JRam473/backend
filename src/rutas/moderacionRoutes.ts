@@ -1,8 +1,7 @@
   import { Router } from 'express';
-  import { moderacionController } from '../controladores/moderacionController';
-  import { uploadExperienciaMiddleware } from '../utils/multerExperiencias';
+  import { moderacionController } from '../controladores/moderacionController.js';
+  import { uploadExperienciaMiddleware } from '../utils/multerExperiencias.js';
   // Si tienes middleware de autenticación admin, impórtalo aquí
-  // import { autenticarAdmin } from '../middleware/autenticacion';
 
   const router = Router();
 

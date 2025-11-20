@@ -1,8 +1,8 @@
 //rutas/calificacionRoutes.ts
 import { Router } from 'express';
-import { calificacionController } from '../controladores/calificacionController';
-import { autenticarAdmin } from '../middleware/autenticacion';
-import { validacion } from '../middleware/validacion';
+import { calificacionController } from '../controladores/calificacionController.js';
+import { autenticarAdmin } from '../middleware/autenticacion.js';
+import { validacion } from '../middleware/validacion.js';
 
 const router = Router();
 

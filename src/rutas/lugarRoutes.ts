@@ -1,9 +1,9 @@
 // rutas/lugarRoutes.ts - VERSIÓN CORREGIDA
 import { Router } from 'express';
-import { lugarController } from '../controladores/lugarController';
-import { autenticarAdmin } from '../middleware/autenticacion';
-import { validacion } from '../middleware/validacion';
-import { uploadImage, uploadPDF, uploadMultipleImages } from '../utils/multerConfig';
+import { lugarController } from '../controladores/lugarController.js';
+import { autenticarAdmin } from '../middleware/autenticacion.js';
+import { validacion } from '../middleware/validacion.js';
+import { uploadImage, uploadPDF, uploadMultipleImages } from '../utils/multerConfig.js';
 
 const router = Router();
 

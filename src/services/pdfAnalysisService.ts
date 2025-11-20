@@ -1,6 +1,5 @@
 // services/pdfAnalysisService.ts - VERSIÓN ES MODULES
 import fs from 'fs';
-import path from 'path';
 import { ModeracionService } from './moderacionService.js';
 import { ModeracionImagenService } from './moderacionImagenService.js';
 import { PdfConversionService } from './pdfConversionService.js';

@@ -1,7 +1,7 @@
 // middleware/verificarPropiedadExperiencia.ts
 import { Request, Response, NextFunction } from 'express';
-import { pool } from '../utils/baseDeDatos';
-import { generarHashNavegador } from '../utils/hashNavegador';
+import { pool } from '../utils/baseDeDatos.js';
+import { generarHashNavegador } from '../utils/hashNavegador.js';
 
 export const verificarPropiedadExperiencia = async (req: Request, res: Response, next: NextFunction) => {
   try {

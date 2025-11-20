@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import passport from '../utils/oauth';
-import { autenticacionController } from '../controladores/autenticacionController';
+import passport from '../utils/oauth.js';
+import { autenticacionController } from '../controladores/autenticacionController.js';
 
 const router = Router();
 

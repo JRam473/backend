@@ -1,7 +1,7 @@
 // backend/src/services/moderacionService.ts - VERSIÓN COMPLETAMENTE CORREGIDA
-import { AnalizadorTexto } from '../utils/analizadorTexto';
-import { pool } from '../utils/baseDeDatos';
-import { ResultadoModeracion, AnalisisTexto } from '../types/moderacion';
+import { AnalizadorTexto } from '../utils/analizadorTexto.js';
+import { pool } from '../utils/baseDeDatos.js';
+import { ResultadoModeracion, AnalisisTexto } from '../types/moderacion.js';
 
 export class ModeracionService {
   private analizadorTexto: AnalizadorTexto;

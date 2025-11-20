@@ -1,13 +1,13 @@
 // services/moderacionImagenService.ts - VERSIÓN CON CLIP INTEGRADO (CORREGIDA)
-import { CloudinaryService } from './cloudinaryService';
-import { pool } from '../utils/baseDeDatos';
+import { CloudinaryService } from './cloudinaryService.js';
+import { pool } from '../utils/baseDeDatos.js';
 import fs from 'fs';
 import path from 'path';
 
 // ✅ NUEVO: Importar servicios CLIP integrados
-import { clipAnalyzerService } from './ClipAnalyzerService';
-import { clipImageDownloader } from './ClipImageDownloader';
-import { ClipAnalysisResult } from '../types/ClipTypes';
+import { clipAnalyzerService } from './ClipAnalyzerService.js';
+import { clipImageDownloader } from './ClipImageDownloader.js';
+import { ClipAnalysisResult } from '../types/ClipTypes.js';
 
 const fsPromises = fs.promises;
 

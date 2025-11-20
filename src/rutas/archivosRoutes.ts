@@ -2,9 +2,9 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
-import { cargaArchivosController } from '../controladores/cargaArchivosController';
-import { autenticarAdmin } from '../middleware/autenticacion';
-import { validacion } from '../middleware/validacion';
+import { cargaArchivosController } from '../controladores/cargaArchivosController.js';
+import { autenticarAdmin } from '../middleware/autenticacion.js';
+import { validacion } from '../middleware/validacion.js';
 
 const router = Router();
 

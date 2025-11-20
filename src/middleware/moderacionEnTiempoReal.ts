@@ -1,6 +1,6 @@
 // backend/src/middleware/moderacionEnTiempoReal.ts - VERSIÓN SOLO TEXTO CORREGIDA
 import { Request, Response, NextFunction } from 'express';
-import { ModeracionService } from '../services/moderacionService';
+import { ModeracionService } from '../services/moderacionService.js';
 
 const moderacionService = new ModeracionService();
 

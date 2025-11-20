@@ -1,8 +1,8 @@
 // controladores/cargaArchivosController.ts - VERSIÓN CORREGIDA
 import { Request, Response } from 'express';
-import { pool } from '../utils/baseDeDatos';
+import { pool } from '../utils/baseDeDatos.js';
 import fs from 'fs/promises';
-import { CloudinaryService } from '../services/cloudinaryService';
+import { CloudinaryService } from '../services/cloudinaryService.js';
 
 export const cargaArchivosController = {
   // Subir foto para lugar (admin only)

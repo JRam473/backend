@@ -1,7 +1,7 @@
 //middleware/autenticacion.ts
 import { Request, Response, NextFunction } from 'express';
-import { verificarToken } from '../utils/jwt';
-import { pool } from '../utils/baseDeDatos';
+import { verificarToken } from '../utils/jwt.js';
+import { pool } from '../utils/baseDeDatos.js';
 
 // Extender la interfaz Request de Express
 declare global {

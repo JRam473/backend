@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 
-import { pool } from '../utils/baseDeDatos';
-import { generarToken } from '../utils/jwt';
-import { compararContraseña, hashContraseña } from '../utils/hashPassword'; // ✅ Usar tu utilidad existente
+import { pool } from '../utils/baseDeDatos.js';
+import { generarToken } from '../utils/jwt.js';
+import { compararContraseña, hashContraseña } from '../utils/hashPassword.js'; // ✅ Usar tu utilidad existente
 
 export const administradorController = {
   // Login local
