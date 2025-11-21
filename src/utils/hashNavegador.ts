@@ -1,9 +1,14 @@
-//utils/hashNavegador.ts
+// utils/hashNavegador.ts
 import { Request } from 'express';
 import { createHash } from 'crypto';
 
 export function generarHashNavegador(req: Request): string {
-  const fingerprint = `${req.ip}-${req.headers['user-agent']}-${req.headers['accept-language']}`;
+  const ip = req.headers['x-forwarded-for']?.[0] || req.ip || 'unknown';
+  const userAgent = req.headers['user-agent'] || '';
+  const acceptLanguage = req.headers['accept-language'] || '';
+  const acceptEncoding = req.headers['accept-encoding'] || '';
+  
+  const fingerprint = `${ip}-${userAgent}-${acceptLanguage}-${acceptEncoding}`;
   return createHash('md5').update(fingerprint).digest('hex');
 }
 

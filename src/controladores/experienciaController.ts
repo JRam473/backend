@@ -882,91 +882,86 @@ export const experienciaController = {
     }
   },
 
-  /**
-   * Registrar vista de experiencia - CON CONTROL DE UNICIDAD MEJORADO - SIN CAMBIOS
-   */
-  async registrarVista(req: Request, res: Response) {
-    try {
-      const { id } = req.params;
-      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-      const agenteUsuario = req.get('User-Agent') || '';
-      const hashNavegador = generarHashNavegador(req);
+/**
+ * Registrar vista de experiencia - VERSIÓN MEJORADA Y LIMPIA
+ */
+async registrarVista(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    
+    // Mejor detección de IP
+    const ipUsuario = req.headers['x-forwarded-for']?.[0] || 
+                     req.ip || 
+                     req.connection.remoteAddress || 
+                     'unknown';
+    
+    const agenteUsuario = req.get('User-Agent') || '';
+    const hashNavegador = generarHashNavegador(req);
 
-      console.log('👀 Registrando vista para experiencia:', { 
-        id, 
-        ip: ipUsuario,
-        hash: hashNavegador.substring(0, 10) + '...'
+    // Verificar que la experiencia existe
+    const expResult = await pool.query(
+      'SELECT id FROM experiencias WHERE id = $1',
+      [id]
+    );
+
+    if (expResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Experiencia no encontrada' 
       });
+    }
 
-      // Verificar que la experiencia existe
-      const expResult = await pool.query(
-        'SELECT id FROM experiencias WHERE id = $1',
-        [id]
-      );
+    // Verificar si ya existe una vista en las últimas 24 horas
+    const vistaExistente = await pool.query(
+      `SELECT id FROM vistas_experiencias 
+       WHERE experiencia_id = $1 
+       AND (
+         (ip_usuario = $2 AND agente_usuario = $3) 
+         OR hash_navegador = $4
+       )
+       AND visto_en >= NOW() - INTERVAL '24 hours'
+       LIMIT 1`,
+      [id, ipUsuario, agenteUsuario, hashNavegador]
+    );
 
-      if (expResult.rows.length === 0) {
-        return res.status(404).json({ 
-          success: false,
-          error: 'Experiencia no encontrada' 
-        });
-      }
-
-      // ✅ NUEVO: Verificar si ya existe una vista desde esta combinación IP/Hash en las últimas 24 horas
-      const vistaExistente = await pool.query(
-        `SELECT id FROM vistas_experiencias 
-         WHERE experiencia_id = $1 
-         AND (
-           (ip_usuario = $2 AND agente_usuario = $3) 
-           OR hash_navegador = $4
-         )
-         AND visto_en >= NOW() - INTERVAL '24 hours'
-         LIMIT 1`,
+    if (vistaExistente.rows.length === 0) {
+      // Insertar nueva vista
+      await pool.query(
+        `INSERT INTO vistas_experiencias 
+         (experiencia_id, ip_usuario, agente_usuario, hash_navegador) 
+         VALUES ($1, $2, $3, $4)`,
         [id, ipUsuario, agenteUsuario, hashNavegador]
       );
 
-      if (vistaExistente.rows.length === 0) {
-        // Insertar nueva vista
-        await pool.query(
-          `INSERT INTO vistas_experiencias 
-           (experiencia_id, ip_usuario, agente_usuario, hash_navegador) 
-           VALUES ($1, $2, $3, $4)`,
-          [id, ipUsuario, agenteUsuario, hashNavegador]
-        );
-
-        // Actualizar contador en la tabla experiencias
-        await pool.query(
-          'UPDATE experiencias SET contador_vistas = contador_vistas + 1 WHERE id = $1',
-          [id]
-        );
-
-        console.log('✅ Nueva vista registrada para experiencia:', id);
-        
-        res.json({ 
-          success: true,
-          mensaje: 'Vista registrada exitosamente',
-          experiencia_id: id,
-          tipo: 'nueva_vista'
-        });
-      } else {
-        console.log('⏭️ Vista duplicada ignorada para experiencia:', id);
-        
-        res.json({ 
-          success: true,
-          mensaje: 'Vista ya registrada anteriormente',
-          experiencia_id: id,
-          tipo: 'vista_duplicada'
-        });
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('❌ Error registrando vista:', errorMessage);
-      res.status(500).json({ 
-        success: false,
-        error: 'Error al registrar vista' 
+      // Actualizar contador en la tabla experiencias
+      await pool.query(
+        'UPDATE experiencias SET contador_vistas = contador_vistas + 1 WHERE id = $1',
+        [id]
+      );
+      
+      res.json({ 
+        success: true,
+        mensaje: 'Vista registrada exitosamente',
+        experiencia_id: id,
+        tipo: 'nueva_vista'
+      });
+    } else {
+      res.json({ 
+        success: true,
+        mensaje: 'Vista ya registrada anteriormente',
+        experiencia_id: id,
+        tipo: 'vista_duplicada'
       });
     }
-  },
+
+  } catch (error) {
+    console.error('❌ Error registrando vista:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al registrar vista' 
+    });
+  }
+},
 
   /**
    * Obtener estadísticas generales (admin only) - ACTUALIZADO CON nombre_usuario
