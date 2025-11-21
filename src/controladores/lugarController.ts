@@ -1356,10 +1356,10 @@ async subirPDFTemporal(req: Request, res: Response) {
 
       console.log('🗑️ Eliminando lugar:', id);
 
-      const result = await pool.query(
-        'DELETE FROM lugares WHERE id = $1 RETURNING *',
-        [id]
-      );
+   const result = await pool.query(
+      'SELECT eliminar_lugar_seguro($1) as eliminado',
+      [id]
+    );
 
       if (result.rows.length === 0) {
         return res.status(404).json({ 
