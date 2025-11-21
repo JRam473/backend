@@ -1349,7 +1349,7 @@ async subirPDFTemporal(req: Request, res: Response) {
     }
   },
 
-// controladores/lugarController.ts - VERSIÓN OPTIMIZADA
+// controladores/lugarController.ts - VERSIÓN CORREGIDA
 async eliminarLugar(req: Request, res: Response) {
   const client = await pool.connect();
   
@@ -1377,7 +1377,15 @@ async eliminarLugar(req: Request, res: Response) {
     const lugar = lugarExistente.rows[0];
     console.log(`📍 Eliminando: ${lugar.nombre}`);
 
-    // 2. Contar registros para logging
+    // 2. DESHABILITAR TRIGGERS PROBLEMÁTICOS TEMPORALMENTE
+    console.log('🔧 Deshabilitando triggers problemáticos...');
+    await client.query(`
+      ALTER TABLE fotos_lugares DISABLE TRIGGER handle_principal_image_delete;
+      ALTER TABLE fotos_lugares DISABLE TRIGGER trigger_foto_principal_unica;
+      ALTER TABLE fotos_lugares DISABLE TRIGGER sync_principal_image_update;
+    `);
+
+    // 3. Contar registros para logging
     const fotosCount = await client.query(
       'SELECT COUNT(*) FROM fotos_lugares WHERE lugar_id = $1',
       [id]
@@ -1395,7 +1403,7 @@ async eliminarLugar(req: Request, res: Response) {
 
     console.log(`📊 Registros relacionados: ${fotosCount.rows[0].count} fotos, ${experienciasCount.rows[0].count} experiencias, ${calificacionesCount.rows[0].count} calificaciones`);
 
-    // 3. Eliminar en orden manual (evita triggers problemáticos)
+    // 4. Eliminar en orden manual
     console.log('🗑️ Eliminando calificaciones...');
     await client.query(
       'DELETE FROM calificaciones_lugares WHERE lugar_id = $1',
@@ -1420,6 +1428,14 @@ async eliminarLugar(req: Request, res: Response) {
       [id]
     );
 
+    // 5. REHABILITAR TRIGGERS
+    console.log('🔧 Rehabilitando triggers...');
+    await client.query(`
+      ALTER TABLE fotos_lugares ENABLE TRIGGER handle_principal_image_delete;
+      ALTER TABLE fotos_lugares ENABLE TRIGGER trigger_foto_principal_unica;
+      ALTER TABLE fotos_lugares ENABLE TRIGGER sync_principal_image_update;
+    `);
+
     await client.query('COMMIT');
 
     console.log('✅ Lugar eliminado exitosamente:', {
@@ -1441,19 +1457,20 @@ async eliminarLugar(req: Request, res: Response) {
     });
 
   } catch (error) {
+    // Asegurarse de rehabilitar triggers incluso en caso de error
+    try {
+      await client.query(`
+        ALTER TABLE fotos_lugares ENABLE TRIGGER handle_principal_image_delete;
+        ALTER TABLE fotos_lugares ENABLE TRIGGER trigger_foto_principal_unica;
+        ALTER TABLE fotos_lugares ENABLE TRIGGER sync_principal_image_update;
+      `);
+    } catch (e) {
+      console.error('Error rehabilitando triggers:', e);
+    }
+    
     await client.query('ROLLBACK').catch(console.error);
     
     console.error('❌ Error eliminando lugar:', error);
-    
-    // Manejo específico del error de triggers
-    if (error instanceof Error && error.message.includes('tuple to be deleted')) {
-      return res.status(500).json({ 
-        success: false,
-        error: 'No se puede eliminar el lugar debido a restricciones de la base de datos',
-        detalle: 'Existen dependencias que impiden la eliminación',
-        solucion: 'Contacte al administrador del sistema'
-      });
-    }
     
     res.status(500).json({ 
       success: false,
@@ -1464,7 +1481,6 @@ async eliminarLugar(req: Request, res: Response) {
     client.release();
   }
 },
-
   // Obtener categorías únicas (público) - SIN CAMBIOS
   async obtenerCategorias(req: Request, res: Response) {
     try {
