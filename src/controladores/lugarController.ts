@@ -1349,40 +1349,121 @@ async subirPDFTemporal(req: Request, res: Response) {
     }
   },
 
-  // Eliminar lugar (admin only) - SIN CAMBIOS
-  async eliminarLugar(req: Request, res: Response) {
-    try {
-      const { id } = req.params;
+// controladores/lugarController.ts - VERSIÓN OPTIMIZADA
+async eliminarLugar(req: Request, res: Response) {
+  const client = await pool.connect();
+  
+  try {
+    const { id } = req.params;
 
-      console.log('🗑️ Eliminando lugar:', id);
+    console.log('🗑️ Eliminando lugar con transacción manual:', id);
 
-      const result = await pool.query(
-        'DELETE FROM lugares WHERE id = $1 RETURNING *',
-        [id]
-      );
+    await client.query('BEGIN');
 
-      if (result.rows.length === 0) {
-        return res.status(404).json({ 
-          success: false,
-          error: 'Lugar no encontrado' 
-        });
-      }
+    // 1. Verificar que el lugar existe
+    const lugarExistente = await client.query(
+      'SELECT id, nombre FROM lugares WHERE id = $1',
+      [id]
+    );
 
-      console.log('✅ Lugar eliminado:', id);
-
-      res.json({ 
-        success: true,
-        mensaje: 'Lugar eliminado exitosamente' 
-      });
-    } catch (error) {
-      console.error('❌ Error eliminando lugar:', error);
-      res.status(500).json({ 
+    if (lugarExistente.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ 
         success: false,
-        error: 'Error al eliminar lugar',
-        detalle: error instanceof Error ? error.message : 'Error desconocido'
+        error: 'Lugar no encontrado' 
       });
     }
-  },
+
+    const lugar = lugarExistente.rows[0];
+    console.log(`📍 Eliminando: ${lugar.nombre}`);
+
+    // 2. Contar registros para logging
+    const fotosCount = await client.query(
+      'SELECT COUNT(*) FROM fotos_lugares WHERE lugar_id = $1',
+      [id]
+    );
+    
+    const experienciasCount = await client.query(
+      'SELECT COUNT(*) FROM experiencias WHERE lugar_id = $1',
+      [id]
+    );
+    
+    const calificacionesCount = await client.query(
+      'SELECT COUNT(*) FROM calificaciones_lugares WHERE lugar_id = $1',
+      [id]
+    );
+
+    console.log(`📊 Registros relacionados: ${fotosCount.rows[0].count} fotos, ${experienciasCount.rows[0].count} experiencias, ${calificacionesCount.rows[0].count} calificaciones`);
+
+    // 3. Eliminar en orden manual (evita triggers problemáticos)
+    console.log('🗑️ Eliminando calificaciones...');
+    await client.query(
+      'DELETE FROM calificaciones_lugares WHERE lugar_id = $1',
+      [id]
+    );
+
+    console.log('🗑️ Eliminando experiencias...');
+    await client.query(
+      'DELETE FROM experiencias WHERE lugar_id = $1',
+      [id]
+    );
+
+    console.log('🗑️ Eliminando fotos...');
+    await client.query(
+      'DELETE FROM fotos_lugares WHERE lugar_id = $1',
+      [id]
+    );
+
+    console.log('🗑️ Eliminando lugar...');
+    const result = await client.query(
+      'DELETE FROM lugares WHERE id = $1 RETURNING *',
+      [id]
+    );
+
+    await client.query('COMMIT');
+
+    console.log('✅ Lugar eliminado exitosamente:', {
+      id: id,
+      nombre: lugar.nombre,
+      fotos: fotosCount.rows[0].count,
+      experiencias: experienciasCount.rows[0].count,
+      calificaciones: calificacionesCount.rows[0].count
+    });
+
+    res.json({ 
+      success: true,
+      mensaje: 'Lugar eliminado exitosamente',
+      estadisticas: {
+        fotos_eliminadas: parseInt(fotosCount.rows[0].count),
+        experiencias_eliminadas: parseInt(experienciasCount.rows[0].count),
+        calificaciones_eliminadas: parseInt(calificacionesCount.rows[0].count)
+      }
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK').catch(console.error);
+    
+    console.error('❌ Error eliminando lugar:', error);
+    
+    // Manejo específico del error de triggers
+    if (error instanceof Error && error.message.includes('tuple to be deleted')) {
+      return res.status(500).json({ 
+        success: false,
+        error: 'No se puede eliminar el lugar debido a restricciones de la base de datos',
+        detalle: 'Existen dependencias que impiden la eliminación',
+        solucion: 'Contacte al administrador del sistema'
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al eliminar lugar',
+      detalle: error instanceof Error ? error.message : 'Error desconocido'
+    });
+  } finally {
+    client.release();
+  }
+},
 
   // Obtener categorías únicas (público) - SIN CAMBIOS
   async obtenerCategorias(req: Request, res: Response) {
