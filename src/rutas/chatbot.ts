@@ -1,14 +1,19 @@
-// rutas/chatbot.ts - VERSIÓN MEJORADA CON RESPUESTAS ESTÁTICAS
+// rutas/chatbot.ts - VERSIÓN INTEGRADA CON BACKEND EXISTENTE
 import { Router } from 'express';
 import dialogflow from '@google-cloud/dialogflow';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { existsSync, readFileSync } from 'fs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
+
+// Rate Limiting (consistente con tu servidor)
+const chatLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 15, // 15 solicitudes por minuto
+  message: { error: "Demasiadas consultas. Por favor espera un momento." },
+  standardHeaders: true,
+});
+
+router.use(chatLimiter);
 
 // Configuración Dialogflow
 let sessionClient: any;
@@ -28,7 +33,6 @@ function initializeDialogflow() {
 
     console.log('🔑 Configurando SessionsClient con variables de entorno...');
     
-    // ✅ USAR EL MISMO MÉTODO QUE EL SERVIDOR FUNCIONAL
     sessionClient = new dialogflow.SessionsClient({
       credentials: {
         client_email: process.env.DIALOGFLOW_CLIENT_EMAIL!,
@@ -50,9 +54,10 @@ function initializeDialogflow() {
   }
 }
 
+// Inicializar Dialogflow al cargar el módulo
 sessionClient = initializeDialogflow();
 
-// Respuestas estáticas mejoradas
+// Respuestas estáticas mejoradas (mismas que tu versión funcional)
 const staticResponses: { [key: string]: string } = {
   "hola": "🌿 **¡Hola! Bienvenido/a a San Juan Tahitic** ✨\n\nSoy tu guía virtual. ¿Te gustaría explorar alguna área específica? Puedo ayudarte con:\n\n• 🏞️ Cascadas y naturaleza\n• 🍽️ Restaurantes y comida\n• 🏨 Hospedaje\n• 🚶 Actividades y tours\n\n¿Qué te interesa conocer?",
   "que cascadas hay": "💧 **¡Nuestras cascadas son mágicas!** \n\nEn San Juan Tahitic tenemos:\n\n• **Cascada Escondida** - Perfecta para fotos\n• **Cascada Cristalina** - Aguas transparentes\n• **Salto del Venado** - Ideal para aventureros\n\n¿Te gustaría saber más sobre alguna en particular?",
@@ -71,12 +76,13 @@ const staticResponses: { [key: string]: string } = {
   "default": "🌿 **¡Interesante pregunta!**\n\nComo guía virtual de San Juan Tahitic, puedo ayudarte con:\n\n• 🏞️ **Cascadas y naturaleza**\n• 🍽️ **Comida y restaurantes**  \n• 🏨 **Hospedaje y cabañas**\n• 🚶 **Actividades y tours**\n• 🗺️ **Cómo llegar y clima**\n\n¿Sobre qué tema te gustaría saber más?"
 };
 
-// Endpoint del chatbot
+// Endpoint principal del chatbot
 router.post("/message", async (req, res) => {
   const { message, sessionId = "visitante", languageCode = "es" } = req.body;
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return res.status(400).json({
+      success: false,
       reply: "📝 Por favor, escribe un mensaje para poder ayudarte.",
       type: "validation_error"
     });
@@ -134,6 +140,7 @@ router.post("/message", async (req, res) => {
     }
 
     res.json({
+      success: true,
       reply,
       intent: intent || "static_fallback",
       timestamp: new Date().toISOString(),
@@ -144,7 +151,8 @@ router.post("/message", async (req, res) => {
     console.error("💥 Error procesando mensaje:");
     
     // Respuesta de error amigable
-    res.json({
+    res.status(500).json({
+      success: false,
       reply: "🌀 **Parece que hay un problema temporal con nuestro sistema...**\n\nPero puedo ayudarte con información sobre:\n\n• 🏞️ Cascadas y naturaleza\n• 🍽️ Restaurantes\n• 🏨 Hospedaje\n• 🚶 Actividades\n\n¿Qué te gustaría saber?",
       intent: "error_fallback",
       timestamp: new Date().toISOString(),
@@ -153,37 +161,47 @@ router.post("/message", async (req, res) => {
   }
 });
 
-// Endpoint para verificar estado del chatbot
-router.get("/chatbot/debug", (req, res) => {
-  const credentialsPath = join(__dirname, '../../dialogflow-key.json');
-  const fileExists = existsSync(credentialsPath);
-  
-  let fileInfo: any = { exists: fileExists, path: credentialsPath };
-  
-  if (fileExists) {
-    try {
-      const fileContent = readFileSync(credentialsPath, 'utf8');
-      const credentials = JSON.parse(fileContent);
-      
-      fileInfo = {
-        ...fileInfo,
-        project_id: credentials.project_id,
-        client_email: credentials.client_email,
-        private_key_id: credentials.private_key_id?.substring(0, 10) + '...',
-        private_key_length: credentials.private_key?.length,
-        private_key_valid: credentials.private_key?.includes('BEGIN PRIVATE KEY')
-      };
-      
-    } catch (parseError: unknown) {
-      fileInfo.parse_error = parseError instanceof Error ? parseError.message : 'Unknown error';
-    }
-  }
-  
+// Endpoint para verificar estado del chatbot (compatible con tu estructura)
+router.get("/chatbot/status", (req, res) => {
   res.json({
+    success: true,
+    service: "San Juan Tahitic Chatbot",
+    status: isDialogflowEnabled ? "connected" : "static_only",
+    dialogflow_enabled: isDialogflowEnabled,
+    project_id: process.env.DIALOGFLOW_PROJECT_ID || "not_configured",
+    static_responses_available: Object.keys(staticResponses).length,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Health check específico del chatbot
+router.get("/chatbot/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "healthy",
+    service: "San Juan Tahitic Chatbot",
+    timestamp: new Date().toISOString(),
+    dialogflow: isDialogflowEnabled ? "connected" : "disabled",
+    features: {
+      static_responses: true,
+      dialogflow_integration: isDialogflowEnabled,
+      rate_limiting: true
+    }
+  });
+});
+
+// Endpoint de debug (opcional)
+router.get("/chatbot/debug", (req, res) => {
+  res.json({
+    success: true,
     dialogflow_configured: isDialogflowEnabled,
     project_id: process.env.DIALOGFLOW_PROJECT_ID,
-    credentials_file: fileInfo,
     static_responses_available: Object.keys(staticResponses).length,
+    environment: {
+      has_project_id: !!process.env.DIALOGFLOW_PROJECT_ID,
+      has_client_email: !!process.env.DIALOGFLOW_CLIENT_EMAIL,
+      has_private_key: !!process.env.DIALOGFLOW_PRIVATE_KEY
+    },
     status: isDialogflowEnabled ? 'configured' : 'static_only'
   });
 });
