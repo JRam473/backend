@@ -29,6 +29,9 @@ let chatbotRoutes: any;
 
 const app = express();
 
+// ✅ SOLUCIÓN CRÍTICA: Configurar trust proxy para rate limiting
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
+
 // ✅ MIDDLEWARES GLOBALES
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -129,6 +132,20 @@ async function initializeApp() {
       });
     });
 
+    // ✅ ENDPOINT DE DEBUG PARA VERIFICAR PROXY (OPCIONAL)
+    app.get('/api/debug/ip', (req, res) => {
+      res.json({
+        ip: req.ip,
+        ips: req.ips,
+        headers: {
+          'x-forwarded-for': req.headers['x-forwarded-for'],
+          'x-real-ip': req.headers['x-real-ip']
+        },
+        trustProxy: app.get('trust proxy'),
+        environment: process.env.NODE_ENV
+      });
+    });
+
     // ✅ MANEJO DE ERRORES
     app.use('/api/', (req, res) => {
       res.status(404).json({
@@ -178,6 +195,7 @@ async function initializeApp() {
       console.log('🗄️  BD:', process.env.DB_NAME || 'PostgreSQL');
       console.log('🖼️  CLIP:', clipListo ? '✅ ACTIVO' : '🔄 INICIALIZANDO');
       console.log('🤖 Chatbot: ✅ INTEGRADO');
+      console.log('🔧 Trust Proxy:', app.get('trust proxy'));
       console.log('🚀 Servidor ejecutándose');
       console.log('=====================================\n');
     });

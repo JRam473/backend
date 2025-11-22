@@ -1,16 +1,36 @@
-// rutas/chatbot.ts - VERSIÓN INTEGRADA CON BACKEND EXISTENTE
-import { Router } from 'express';
+// rutas/chatbot.ts - VERSIÓN CORREGIDA SIN ERRORES DE TYPESCRIPT
+import { Router, Request, Response } from 'express';
 import dialogflow from '@google-cloud/dialogflow';
 import rateLimit from 'express-rate-limit';
 
 const router = Router();
 
-// Rate Limiting (consistente con tu servidor)
+// ✅ RATE LIMITING CORREGIDO - SIN ERRORES TYPESCRIPT
 const chatLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 25, // 15 solicitudes por minuto
-  message: { error: "Demasiadas consultas. Por favor espera un momento." },
-  standardHeaders: true,
+  max: 25, // 25 solicitudes por minuto
+  message: JSON.stringify({ 
+    success: false,
+    error: "Demasiadas consultas. Por favor espera un momento." 
+  }),
+  standardHeaders: false, // ✅ Evita conflicto con X-Forwarded-For
+  legacyHeaders: false,   // ✅ Deshabilita headers legacy
+  keyGenerator: (req: Request): string => {
+    // ✅ Usar IP directamente - Express maneja el proxy automáticamente
+    return req.ip || 'unknown-ip';
+  },
+  handler: (req: Request, res: Response) => {
+    // ✅ SOLUCIÓN: Asegurar que resetTime sea un número
+    const resetTimeValue = req.rateLimit?.resetTime;
+    const resetTime = typeof resetTimeValue === 'number' ? resetTimeValue : Date.now() + 60000;
+    const retryAfter = Math.ceil((resetTime - Date.now()) / 1000);
+    
+    res.status(429).json({
+      success: false,
+      error: "Demasiadas consultas. Por favor espera un momento.",
+      retryAfter: retryAfter > 0 ? retryAfter : 60
+    });
+  }
 });
 
 router.use(chatLimiter);
@@ -19,7 +39,27 @@ router.use(chatLimiter);
 let sessionClient: any;
 let isDialogflowEnabled = false;
 
-function initializeDialogflow() {
+// Interfaces para TypeScript
+interface ChatbotRequest {
+  message: string;
+  sessionId?: string;
+  languageCode?: string;
+}
+
+interface ChatbotResponse {
+  success: boolean;
+  reply: string;
+  intent?: string;
+  timestamp: string;
+  source: string;
+}
+
+interface DialogflowCredentials {
+  client_email: string;
+  private_key: string;
+}
+
+function initializeDialogflow(): any {
   try {
     console.log('🔧 Inicializando Dialogflow...');
     
@@ -33,12 +73,14 @@ function initializeDialogflow() {
 
     console.log('🔑 Configurando SessionsClient con variables de entorno...');
     
+    const credentials: DialogflowCredentials = {
+      client_email: process.env.DIALOGFLOW_CLIENT_EMAIL!,
+      private_key: process.env.DIALOGFLOW_PRIVATE_KEY!.replace(/\\n/g, '\n'),
+    };
+
     sessionClient = new dialogflow.SessionsClient({
-      credentials: {
-        client_email: process.env.DIALOGFLOW_CLIENT_EMAIL!,
-        private_key: process.env.DIALOGFLOW_PRIVATE_KEY!.replace(/\\n/g, '\n'),
-      },
-      projectId: process.env.DIALOGFLOW_PROJECT_ID,
+      credentials: credentials,
+      projectId: process.env.DIALOGFLOW_PROJECT_ID!,
     });
 
     isDialogflowEnabled = true;
@@ -57,7 +99,7 @@ function initializeDialogflow() {
 // Inicializar Dialogflow al cargar el módulo
 sessionClient = initializeDialogflow();
 
-// Respuestas estáticas mejoradas (mismas que tu versión funcional)
+// Respuestas estáticas mejoradas
 const staticResponses: { [key: string]: string } = {
   "hola": "🌿 **¡Hola! Bienvenido/a a San Juan Tahitic** ✨\n\nSoy tu guía virtual. ¿Te gustaría explorar alguna área específica? Puedo ayudarte con:\n\n• 🏞️ Cascadas y naturaleza\n• 🍽️ Restaurantes y comida\n• 🏨 Hospedaje\n• 🚶 Actividades y tours\n\n¿Qué te interesa conocer?",
   "que cascadas hay": "💧 **¡Nuestras cascadas son mágicas!** \n\nEn San Juan Tahitic tenemos:\n\n• **Cascada Escondida** - Perfecta para fotos\n• **Cascada Cristalina** - Aguas transparentes\n• **Salto del Venado** - Ideal para aventureros\n\n¿Te gustaría saber más sobre alguna en particular?",
@@ -77,8 +119,8 @@ const staticResponses: { [key: string]: string } = {
 };
 
 // Endpoint principal del chatbot
-router.post("/message", async (req, res) => {
-  const { message, sessionId = "visitante", languageCode = "es" } = req.body;
+router.post("/message", async (req: Request, res: Response) => {
+  const { message, sessionId = "visitante", languageCode = "es" }: ChatbotRequest = req.body;
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return res.status(400).json({
@@ -91,7 +133,8 @@ router.post("/message", async (req, res) => {
   const userMessage = message.trim().toLowerCase();
   
   try {
-    let reply, intent;
+    let reply: string = ''; // ✅ Inicializar con valor por defecto
+    let intent: string | undefined;
     let usedDialogflow = false;
 
     // Intentar con Dialogflow si está disponible
@@ -109,7 +152,7 @@ router.post("/message", async (req, res) => {
           queryInput: {
             text: {
               text: userMessage,
-              languageCode,
+              languageCode: languageCode || "es",
             },
           },
         };
@@ -139,13 +182,15 @@ router.post("/message", async (req, res) => {
       intent = "static_response";
     }
 
-    res.json({
+    const response: ChatbotResponse = {
       success: true,
       reply,
       intent: intent || "static_fallback",
       timestamp: new Date().toISOString(),
       source: usedDialogflow ? "dialogflow" : "static"
-    });
+    };
+
+    res.json(response);
 
   } catch (error: unknown) {
     console.error("💥 Error procesando mensaje:");
@@ -161,8 +206,8 @@ router.post("/message", async (req, res) => {
   }
 });
 
-// Endpoint para verificar estado del chatbot (compatible con tu estructura)
-router.get("/chatbot/status", (req, res) => {
+// Endpoint para verificar estado del chatbot
+router.get("/chatbot/status", (req: Request, res: Response) => {
   res.json({
     success: true,
     service: "San Juan Tahitic Chatbot",
@@ -170,12 +215,17 @@ router.get("/chatbot/status", (req, res) => {
     dialogflow_enabled: isDialogflowEnabled,
     project_id: process.env.DIALOGFLOW_PROJECT_ID || "not_configured",
     static_responses_available: Object.keys(staticResponses).length,
+    rate_limiting: {
+      enabled: true,
+      max_requests: 25,
+      window_minutes: 1
+    },
     timestamp: new Date().toISOString()
   });
 });
 
 // Health check específico del chatbot
-router.get("/chatbot/health", (req, res) => {
+router.get("/chatbot/health", (req: Request, res: Response) => {
   res.json({
     success: true,
     status: "healthy",
@@ -186,12 +236,13 @@ router.get("/chatbot/health", (req, res) => {
       static_responses: true,
       dialogflow_integration: isDialogflowEnabled,
       rate_limiting: true
-    }
+    },
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
 // Endpoint de debug (opcional)
-router.get("/chatbot/debug", (req, res) => {
+router.get("/chatbot/debug", (req: Request, res: Response) => {
   res.json({
     success: true,
     dialogflow_configured: isDialogflowEnabled,
@@ -200,7 +251,8 @@ router.get("/chatbot/debug", (req, res) => {
     environment: {
       has_project_id: !!process.env.DIALOGFLOW_PROJECT_ID,
       has_client_email: !!process.env.DIALOGFLOW_CLIENT_EMAIL,
-      has_private_key: !!process.env.DIALOGFLOW_PRIVATE_KEY
+      has_private_key: !!process.env.DIALOGFLOW_PRIVATE_KEY,
+      node_env: process.env.NODE_ENV
     },
     status: isDialogflowEnabled ? 'configured' : 'static_only'
   });
