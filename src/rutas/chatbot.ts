@@ -1,23 +1,34 @@
-// rutas/chatbot.ts - VERSIÓN IDÉNTICA AL PRIMER CHATBOT
+// rutas/chatbot.ts - VERSIÓN MEJORADA CON RESPUESTAS ESTÁTICAS
 import { Router } from 'express';
 import dialogflow from '@google-cloud/dialogflow';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { existsSync, readFileSync } from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const router = Router();
 
-// Configuración Dialogflow (IDÉNTICA al primer código)
+// Configuración Dialogflow
 let sessionClient: any;
 let isDialogflowEnabled = false;
 
 function initializeDialogflow() {
   try {
+    console.log('🔧 Inicializando Dialogflow...');
+    
     const requiredEnvVars = ['DIALOGFLOW_PROJECT_ID', 'DIALOGFLOW_CLIENT_EMAIL', 'DIALOGFLOW_PRIVATE_KEY'];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
     
     if (missingVars.length > 0) {
-      console.log("💡 Usando respuestas estáticas. Configura Dialogflow en .env para habilitar IA");
+      console.log("💡 Usando respuestas estáticas. Faltan variables en .env:", missingVars);
       return null;
     }
 
+    console.log('🔑 Configurando SessionsClient con variables de entorno...');
+    
+    // ✅ USAR EL MISMO MÉTODO QUE EL SERVIDOR FUNCIONAL
     sessionClient = new dialogflow.SessionsClient({
       credentials: {
         client_email: process.env.DIALOGFLOW_CLIENT_EMAIL!,
@@ -27,21 +38,24 @@ function initializeDialogflow() {
     });
 
     isDialogflowEnabled = true;
-    console.log("✅ Dialogflow configurado");
+    console.log("✅ Dialogflow configurado desde variables de entorno");
     return sessionClient;
 
   } catch (error: unknown) {
-    console.error("Error inicializando Dialogflow:", error instanceof Error ? error.message : 'Unknown error');
+    console.error("❌ Error inicializando Dialogflow:");
+    if (error instanceof Error) {
+      console.error("🔍 Detalles:", error.message);
+    }
     return null;
   }
 }
 
 sessionClient = initializeDialogflow();
 
-// Respuestas estáticas (EXACTAMENTE IGUALES al primer código)
+// Respuestas estáticas mejoradas
 const staticResponses: { [key: string]: string } = {
-  "hola": "🌿 **¡Hola! Bienvenido/a a San Juan Tahitic** ✨\n\nSoy tu guía virtual. ¿Te gustaría explorar alguna área específica?",
-  "que cascadas hay": "💧 **¡Nuestras cascadas son mágicas!** \n\nEn San Juan Tahitic tenemos varias cascadas hermosas para visitar.",
+  "hola": "🌿 **¡Hola! Bienvenido/a a San Juan Tahitic** ✨\n\nSoy tu guía virtual. ¿Te gustaría explorar alguna área específica? Puedo ayudarte con:\n\n• 🏞️ Cascadas y naturaleza\n• 🍽️ Restaurantes y comida\n• 🏨 Hospedaje\n• 🚶 Actividades y tours\n\n¿Qué te interesa conocer?",
+  "que cascadas hay": "💧 **¡Nuestras cascadas son mágicas!** \n\nEn San Juan Tahitic tenemos:\n\n• **Cascada Escondida** - Perfecta para fotos\n• **Cascada Cristalina** - Aguas transparentes\n• **Salto del Venado** - Ideal para aventureros\n\n¿Te gustaría saber más sobre alguna en particular?",
   "cascadas": "💦 **¡Tenemos varias opciones!**\n\n• **Cascada Escondida** - Acceso fácil, perfecta para familias\n• **Cascada Cristalina** - Aguas cristalinas para nadar\n• **Salto del Venado** - Para los más aventureros\n\n¿Cuál te llama más la atención?",
   "donde comer": "🍽️ **¡Deliciosas opciones!** \n\n**Restaurantes recomendados:**\n\n• **El Fogón Tradicional** - Comida local auténtica\n• **La Terraza** - Vistas espectaculares\n• **Sabores de la Sierra** - Fusión moderna\n\n¿Buscas algo específico?",
   "comida": "🥘 **¡Tenemos de todo!**\n\nDesde comida tradicional hasta opciones internacionales:\n\n• Comida típica de la región\n• Mariscos frescos\n• Opciones vegetarianas\n• Postres artesanales\n\n¿Qué tipo de comida prefieres?",
@@ -54,10 +68,10 @@ const staticResponses: { [key: string]: string } = {
   "clima": "🌤️ **Clima en San Juan Tahitic**\n\n**Generalmente:**\n• Templado y agradable\n• Lluvias en temporada (mayo-octubre)\n• Mejor época: noviembre-abril\n\n**Recomendación:**\n• Llevar ropa cómoda\n• Impermeable en temporada de lluvias\n• Protector solar\n\n¿Planeas tu visita para pronto?",
   "gracias": "🙏 **¡De nada! Espero haberte ayudado.**\n\nSi necesitas más información sobre:\n• Cascadas específicas\n• Reservas de hospedaje\n• Actividades disponibles\n\n¡No dudes en preguntar! 🌿",
   "adios": "👋 **¡Hasta pronto!**\n\nEspero verte pronto en San Juan Tahitic. ¡Te va a encantar!\n\n🌄 *Donde la naturaleza te abraza*",
-  "default": "🌿 **Interesante pregunta...**\n\nTe invito a explorar nuestras secciones usando los botones de arriba."
+  "default": "🌿 **¡Interesante pregunta!**\n\nComo guía virtual de San Juan Tahitic, puedo ayudarte con:\n\n• 🏞️ **Cascadas y naturaleza**\n• 🍽️ **Comida y restaurantes**  \n• 🏨 **Hospedaje y cabañas**\n• 🚶 **Actividades y tours**\n• 🗺️ **Cómo llegar y clima**\n\n¿Sobre qué tema te gustaría saber más?"
 };
 
-// Endpoint del chatbot (IDÉNTICO al primer código)
+// Endpoint del chatbot
 router.post("/message", async (req, res) => {
   const { message, sessionId = "visitante", languageCode = "es" } = req.body;
 
@@ -72,10 +86,13 @@ router.post("/message", async (req, res) => {
   
   try {
     let reply, intent;
+    let usedDialogflow = false;
 
-    // Intentar con Dialogflow si está disponible (MISMA LÓGICA)
+    // Intentar con Dialogflow si está disponible
     if (isDialogflowEnabled && sessionClient) {
       try {
+        console.log(`🤖 Intentando Dialogflow: "${userMessage}"`);
+        
         const sessionPath = sessionClient.projectAgentSessionPath(
           process.env.DIALOGFLOW_PROJECT_ID!, 
           sessionId
@@ -94,15 +111,23 @@ router.post("/message", async (req, res) => {
         const [response] = await sessionClient.detectIntent(request);
         const result = response.queryResult;
         
-        reply = result.fulfillmentText;
-        intent = result.intent?.displayName;
+        // Solo usar Dialogflow si devuelve una respuesta útil
+        if (result.fulfillmentText && result.fulfillmentText.length > 10) {
+          console.log('✅ Dialogflow funcionó!');
+          reply = result.fulfillmentText;
+          intent = result.intent?.displayName;
+          usedDialogflow = true;
+        } else {
+          console.log('💡 Dialogflow no devolvió respuesta útil, usando estática');
+        }
         
-      } catch (dialogflowError) {
-        // Fallback a respuestas estáticas (sin logs detallados)
+      } catch (dialogflowError: unknown) {
+        console.log("❌ Dialogflow falló, usando respuestas estáticas");
+        // No mostrar el error completo para no saturar logs
       }
     }
 
-    // Usar respuesta estática si Dialogflow falló (MISMA LÓGICA)
+    // Usar respuesta estática si Dialogflow falló o no está disponible
     if (!reply) {
       reply = staticResponses[userMessage] || staticResponses.default;
       intent = "static_response";
@@ -112,28 +137,54 @@ router.post("/message", async (req, res) => {
       reply,
       intent: intent || "static_fallback",
       timestamp: new Date().toISOString(),
-      source: isDialogflowEnabled ? "dialogflow" : "static"
+      source: usedDialogflow ? "dialogflow" : "static"
     });
 
   } catch (error: unknown) {
-    console.error("Error procesando mensaje:", error);
+    console.error("💥 Error procesando mensaje:");
     
-    // MISMA respuesta de error
+    // Respuesta de error amigable
     res.json({
-      reply: "🌀 **La conexión con nuestros guías se ha interrumpido...**\n\nPor favor, intenta nuevamente.",
+      reply: "🌀 **Parece que hay un problema temporal con nuestro sistema...**\n\nPero puedo ayudarte con información sobre:\n\n• 🏞️ Cascadas y naturaleza\n• 🍽️ Restaurantes\n• 🏨 Hospedaje\n• 🚶 Actividades\n\n¿Qué te gustaría saber?",
       intent: "error_fallback",
       timestamp: new Date().toISOString(),
+      source: "static"
     });
   }
 });
 
-// Health check adicional (opcional, no existe en el primer código)
-router.get("/health", (req, res) => {
+// Endpoint para verificar estado del chatbot
+router.get("/chatbot/debug", (req, res) => {
+  const credentialsPath = join(__dirname, '../../dialogflow-key.json');
+  const fileExists = existsSync(credentialsPath);
+  
+  let fileInfo: any = { exists: fileExists, path: credentialsPath };
+  
+  if (fileExists) {
+    try {
+      const fileContent = readFileSync(credentialsPath, 'utf8');
+      const credentials = JSON.parse(fileContent);
+      
+      fileInfo = {
+        ...fileInfo,
+        project_id: credentials.project_id,
+        client_email: credentials.client_email,
+        private_key_id: credentials.private_key_id?.substring(0, 10) + '...',
+        private_key_length: credentials.private_key?.length,
+        private_key_valid: credentials.private_key?.includes('BEGIN PRIVATE KEY')
+      };
+      
+    } catch (parseError: unknown) {
+      fileInfo.parse_error = parseError instanceof Error ? parseError.message : 'Unknown error';
+    }
+  }
+  
   res.json({
-    status: "healthy",
-    service: "San Juan Tahitic Chatbot API",
-    timestamp: new Date().toISOString(),
-    dialogflow: isDialogflowEnabled ? "connected" : "disabled"
+    dialogflow_configured: isDialogflowEnabled,
+    project_id: process.env.DIALOGFLOW_PROJECT_ID,
+    credentials_file: fileInfo,
+    static_responses_available: Object.keys(staticResponses).length,
+    status: isDialogflowEnabled ? 'configured' : 'static_only'
   });
 });
 
