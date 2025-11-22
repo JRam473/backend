@@ -236,149 +236,159 @@ export const experienciaController = {
 
 
   /**
-   * ✅ NUEVO: Validar texto Y nombre de usuario antes de subir archivos multimedia
-   */
-  async validarTextoPrev(req: Request, res: Response) {
-    try {
-      const { texto, nombre_usuario } = req.body;
-      
-      if (!texto?.trim()) {
-        return res.status(400).json({
-          success: false,
-          error: 'Texto requerido para validación'
-        });
-      }
-
-      const hashNavegador = generarHashNavegador(req);
-      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-
-      console.log('🔍 Validando texto y nombre previo:', {
-        texto: texto.substring(0, 50) + '...',
-        nombre_usuario: nombre_usuario || 'undefined (anónimo)',
-        hash: hashNavegador.substring(0, 10) + '...',
-        ip: ipUsuario
-      });
-
-      const moderacionService = new ModeracionService();
-
-      // ✅ 1. VALIDAR NOMBRE DE USUARIO PRIMERO
-      const resultadoModeracionNombre = await moderarNombreUsuario(
-        nombre_usuario,
-        ipUsuario,
-        hashNavegador,
-        moderacionService
-      );
-
-      if (!resultadoModeracionNombre.esAprobado) {
-        console.log('❌ Nombre de usuario rechazado en validación previa:', resultadoModeracionNombre.motivoRechazo);
-        
-        let detallesEspecificos: string[] = [];
-        
-        if (resultadoModeracionNombre.detalles?.texto) {
-          const texto = resultadoModeracionNombre.detalles.texto;
-          if (texto.palabrasOfensivas?.length > 0) {
-            detallesEspecificos.push(`Palabras problemáticas: ${texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
-          }
-        }
-
-        return res.status(400).json({
-          success: false,
-          error: 'NOMBRE_USUARIO_RECHAZADO',
-          message: 'El nombre de usuario no cumple con las políticas de contenido',
-          motivo: resultadoModeracionNombre.motivoRechazo,
-          tipo: 'nombre_usuario',
-          detalles: {
-            problemas: detallesEspecificos,
-            sugerencias: generarSugerencias('nombre_usuario'),
-            timestamp: new Date().toISOString()
-          }
-        });
-      }
-
-      // ✅ 2. VALIDAR TEXTO PRINCIPAL
-      const resultadoModeracion = await moderacionService.moderarTexto(
-        texto,
-        ipUsuario,
-        hashNavegador
-      );
-
-      // ✅ SI ES RECHAZADO: Devolver motivo específico del log
-      if (!resultadoModeracion.esAprobado) {
-        console.log('❌ Texto rechazado en validación previa:', resultadoModeracion.motivoRechazo);
-        
-        // Buscar el log más reciente para obtener detalles específicos
-        const logReciente = await pool.query(
-          `SELECT motivo, resultado_moderacion 
-           FROM logs_moderacion 
-           WHERE hash_navegador = $1 
-           ORDER BY creado_en DESC 
-           LIMIT 1`,
-          [hashNavegador]
-        );
-
-        let motivoDetallado = resultadoModeracion.motivoRechazo;
-        let detallesEspecificos: string[] = [];
-
-        if (logReciente.rows.length > 0) {
-          const log = logReciente.rows[0];
-          motivoDetallado = log.motivo;
-          
-          // Extraer detalles específicos del resultado de moderación
-          try {
-            const resultado = JSON.parse(log.resultado_moderacion);
-            if (resultado.analisisTexto) {
-              const analisis = resultado.analisisTexto;
-              if (analisis.palabrasOfensivas?.length > 0) {
-                detallesEspecificos.push(`Palabras problemáticas: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
-              }
-              if (analisis.razon) {
-                detallesEspecificos.push(`Razón: ${analisis.razon}`);
-              }
-            }
-          } catch (error) {
-            console.error('Error parseando resultado moderación:', error);
-          }
-        }
-
-        return res.status(400).json({
-          success: false,
-          error: 'TEXTO_RECHAZADO',
-          message: 'El texto no cumple con las políticas de contenido',
-          motivo: motivoDetallado,
-          detalles: {
-            puntuacion: resultadoModeracion.puntuacionGeneral,
-            problemas: detallesEspecificos,
-            sugerencias: generarSugerencias('texto'),
-            timestamp: new Date().toISOString()
-          }
-        });
-      }
-
-      // ✅ SI TODO ES APROBADO
-      console.log('✅ Texto y nombre aprobados en validación previa');
-      
-      res.json({
-        success: true,
-        esAprobado: true,
-        mensaje: 'Contenido aprobado, puedes continuar con la subida de archivos',
-        puntuacion: resultadoModeracion.puntuacionGeneral,
-        nombre_usuario_aprobado: !!nombre_usuario?.trim(),
-        detalles: {
-          texto: resultadoModeracion.detalles?.texto
-        }
-      });
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('❌ Error validando contenido:', errorMessage);
-      
-      res.status(500).json({
+ * ✅ NUEVO: Validar texto Y nombre de usuario antes de subir archivos multimedia
+ */
+async validarTextoPrev(req: Request, res: Response) {
+  try {
+    const { texto, nombre_usuario } = req.body;
+    
+    if (!texto?.trim()) {
+      return res.status(400).json({
         success: false,
-        error: 'Error al validar contenido',
-        message: errorMessage
+        error: 'Texto requerido para validación'
       });
     }
-  },
+
+    const hashNavegador = generarHashNavegador(req);
+    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+    console.log('🔍 Validando texto y nombre previo:', {
+      texto: texto.substring(0, 50) + '...',
+      nombre_usuario: nombre_usuario || 'undefined (anónimo)',
+      hash: hashNavegador.substring(0, 10) + '...',
+      ip: ipUsuario
+    });
+
+    const moderacionService = new ModeracionService();
+
+    // ✅ 1. VALIDAR NOMBRE DE USUARIO PRIMERO
+    const resultadoModeracionNombre = await moderarNombreUsuario(
+      nombre_usuario,
+      ipUsuario,
+      hashNavegador,
+      moderacionService
+    );
+
+    if (!resultadoModeracionNombre.esAprobado) {
+      console.log('❌ Nombre de usuario rechazado en validación previa:', resultadoModeracionNombre.motivoRechazo);
+      
+      let detallesEspecificos: string[] = [];
+      
+      if (resultadoModeracionNombre.detalles?.texto) {
+        const texto = resultadoModeracionNombre.detalles.texto;
+        if (texto.palabrasOfensivas?.length > 0) {
+          detallesEspecificos.push(`Palabras problemáticas: ${texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
+        }
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: 'NOMBRE_USUARIO_RECHAZADO',
+        message: 'El nombre de usuario no cumple con las políticas de contenido',
+        motivo: resultadoModeracionNombre.motivoRechazo,
+        tipo: 'nombre_usuario',
+        detalles: {
+          problemas: detallesEspecificos,
+          sugerencias: generarSugerencias('nombre_usuario'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // ✅ 2. VALIDAR TEXTO PRINCIPAL
+    const resultadoModeracion = await moderacionService.moderarTexto(
+      texto,
+      ipUsuario,
+      hashNavegador
+    );
+
+    // ✅ SI ES RECHAZADO: Devolver motivo específico del log
+    if (!resultadoModeracion.esAprobado) {
+      console.log('❌ Texto rechazado en validación previa:', resultadoModeracion.motivoRechazo);
+      
+      // Buscar el log más reciente para obtener detalles específicos
+      const logReciente = await pool.query(
+        `SELECT motivo, resultado_moderacion 
+         FROM logs_moderacion 
+         WHERE hash_navegador = $1 
+         ORDER BY creado_en DESC 
+         LIMIT 1`,
+        [hashNavegador]
+      );
+
+      let motivoDetallado = resultadoModeracion.motivoRechazo;
+      let detallesEspecificos: string[] = [];
+
+      if (logReciente.rows.length > 0) {
+        const log = logReciente.rows[0];
+        motivoDetallado = log.motivo;
+        
+        // ✅ CORRECCIÓN: Manejar correctamente el tipo de dato
+        try {
+          let resultado;
+          
+          if (typeof log.resultado_moderacion === 'string') {
+            resultado = JSON.parse(log.resultado_moderacion);
+          } else {
+            resultado = log.resultado_moderacion; // Ya es objeto
+          }
+          
+          if (resultado && resultado.analisisTexto) {
+            const analisis = resultado.analisisTexto;
+            if (analisis.palabrasOfensivas?.length > 0) {
+              detallesEspecificos.push(`${analisis.palabrasOfensivas.length} palabras ofensivas detectadas`);
+              detallesEspecificos.push(`Ejemplos: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
+            }
+            if (analisis.razon) {
+              detallesEspecificos.push(`Razón: ${analisis.razon}`);
+            }
+          }
+        } catch (error) {
+          console.error('Error procesando resultado moderación:', error);
+          // ✅ FALLBACK SEGURO
+          detallesEspecificos.push('Lenguaje inapropiado detectado');
+        }
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: 'TEXTO_RECHAZADO',
+        message: 'El texto no cumple con las políticas de contenido',
+        motivo: motivoDetallado,
+        detalles: {
+          puntuacion: resultadoModeracion.puntuacionGeneral,
+          problemas: detallesEspecificos,
+          sugerencias: generarSugerencias('texto'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // ✅ SI TODO ES APROBADO
+    console.log('✅ Texto y nombre aprobados en validación previa');
+    
+    res.json({
+      success: true,
+      esAprobado: true,
+      mensaje: 'Contenido aprobado, puedes continuar con la subida de archivos',
+      puntuacion: resultadoModeracion.puntuacionGeneral,
+      nombre_usuario_aprobado: !!nombre_usuario?.trim(),
+      detalles: {
+        texto: resultadoModeracion.detalles?.texto
+      }
+    });
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('❌ Error validando contenido:', errorMessage);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Error al validar contenido',
+      message: errorMessage
+    });
+  }
+},
 
   /**
    * ✅ NUEVO: Obtener motivos de rechazo específicos desde logs

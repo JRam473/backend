@@ -8,7 +8,7 @@ const router = Router();
 // Rate Limiting (consistente con tu servidor)
 const chatLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 15, // 15 solicitudes por minuto
+  max: 25, // 15 solicitudes por minuto
   message: { error: "Demasiadas consultas. Por favor espera un momento." },
   standardHeaders: true,
 });
