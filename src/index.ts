@@ -42,6 +42,22 @@ async function initializeApp() {
   try {
     console.log('🔄 Inicializando aplicación...');
 
+    // ✅ INICIALIZAR DIRECTORIOS DE UPLOAD PRIMERO
+    console.log('📁 Inicializando directorios de upload...');
+    try {
+      const multerConfigModule = await import('./utils/multerConfig.js');
+      if (multerConfigModule.initializeUploadDirectories) {
+        multerConfigModule.initializeUploadDirectories();
+        console.log('✅ Directorios de upload inicializados');
+      } else {
+        console.warn('⚠️ initializeUploadDirectories no encontrado en multerConfig');
+        // Fallback: crear directorios manualmente
+      }
+    } catch (error) {
+      console.error('❌ Error inicializando directorios de upload:', error);
+      throw error;
+    }
+
     // ✅ CARGAR MÓDULOS ESENCIALES
     const passportModule = await import('./utils/oauth.js');
     passport = passportModule.default;
@@ -196,6 +212,7 @@ async function initializeApp() {
       console.log('🖼️  CLIP:', clipListo ? '✅ ACTIVO' : '🔄 INICIALIZANDO');
       console.log('🤖 Chatbot: ✅ INTEGRADO');
       console.log('🔧 Trust Proxy:', app.get('trust proxy'));
+      console.log('📁 Directorios de Upload: ✅ INICIALIZADOS');
       console.log('🚀 Servidor ejecutándose');
       console.log('=====================================\n');
     });
