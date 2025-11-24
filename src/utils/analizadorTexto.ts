@@ -534,26 +534,29 @@ export class AnalizadorTexto {
       });
 
       // ✅ COMBINAR: Análisis de toxicidad + coherencia (con contexto)
-      const esToxico = (perspectiveResult.TOXICITY || 0) >= 0.3;
-      const esCoherente = analisisCoherencia.tieneSentido;
-      
-      // ✅ CRITERIOS DIFERENTES SEGÚN CONTEXTO
-      const esAprobado = contexto === 'pdf' 
-        ? !esToxico // Para PDFs, solo verificar toxicidad
-        : !esToxico && esCoherente; // Para general, verificar ambos
-      
-      const puntuacion = this.calcularPuntuacionCombinada(
-        perspectiveResult, 
-        analisisCoherencia,
-        contexto
-      );
-      
-      const razon = this.generarRazonCombinada(
-        perspectiveResult, 
-        analisisCoherencia,
-        contexto
-      );
-      
+const esToxico = (perspectiveResult.TOXICITY || 0) >= 0.3;
+const esCoherente = analisisCoherencia.tieneSentido;
+
+// ✅ CRITERIOS CLAROS Y SIN CONFLICTOS
+let esAprobado = true;
+
+if (esToxico) {
+  esAprobado = false;
+} else if (contexto === 'general' && !esCoherente) {
+  esAprobado = false;
+}
+
+const puntuacion = this.calcularPuntuacionCombinada(
+  perspectiveResult, 
+  analisisCoherencia,
+  contexto
+);
+
+const razon = this.generarRazonCombinada(
+  perspectiveResult, 
+  analisisCoherencia,
+  contexto
+);
       const intencion = this.determinarIntencionCombinada(
         perspectiveResult, 
         analisisCoherencia
@@ -970,11 +973,9 @@ export class AnalizadorTexto {
     }
   }
 
-  /**
-   * ✅ MODIFICADO: GENERAR RAZÓN COMBINADA CON CONTEXTO
-   */
-  // En analizadorTexto.ts - CORREGIR EL MÉTODO generarRazonCombinada
-
+/**
+ * ✅ CORREGIDO: GENERAR RAZÓN COMBINADA CON CONTEXTO - VERSIÓN SIMPLIFICADA
+ */
 private generarRazonCombinada(
   perspectiveScores: { [key: string]: number },
   coherencia: { razon: string; tieneSentido: boolean },
@@ -984,23 +985,18 @@ private generarRazonCombinada(
     .filter(([category, score]) => (score || 0) > 0.7)
     .map(([category]) => this.traducirCategoria(category));
 
-  // ✅ CORREGIDO: SI HAY TOXICIDAD, SIEMPRE DECIR "NO APROBADO"
+  // ✅ SI HAY CATEGORÍAS TÓXICAS, SIEMPRE RECHAZAR
   if (categoriasToxicas.length > 0) {
     return `Contenido no aprobado: ${categoriasToxicas.join(', ')}`;
   }
-  
-  // ✅ CORREGIDO: LÓGICA CLARA SIN CONTRADICCIONES
-  if (contexto === 'pdf') {
-    // Para PDFs: solo verificar toxicidad
-    return 'Contenido aprobado';
-  } else {
-    // Para general: verificar ambos
-    if (!coherencia.tieneSentido) {
-      return `Contenido no aprobado: ${coherencia.razon}`;
-    } else {
-      return 'Contenido aprobado';
-    }
+
+  // ✅ PARA CONTEXTO GENERAL, VERIFICAR COHERENCIA
+  if (contexto === 'general' && !coherencia.tieneSentido) {
+    return `Contenido no aprobado: ${coherencia.razon}`;
   }
+
+  // ✅ SI PASA TODAS LAS VERIFICACIONES, APROBAR
+  return 'Contenido aprobado';
 }
 
   /**
@@ -1027,9 +1023,9 @@ private generarRazonCombinada(
     return 'inocente';
   }
 
-  /**
-   * ✅ MODIFICADO: FALLBACK MEJORADO CON CONTEXTO
-   */
+/**
+ * ✅ CORREGIDO: FALLBACK MEJORADO CON CONTEXTO
+ */
 private usarFallbackConCoherencia(
   texto: string, 
   coherencia: any, 
@@ -1039,30 +1035,26 @@ private usarFallbackConCoherencia(
   
   const deteccionOfensiva = this.detectarContenidoOfensivoLocal(texto);
   
-  // ✅ CRITERIOS DIFERENTES SEGÚN CONTEXTO
-  const esAprobado = contexto === 'pdf'
-    ? !deteccionOfensiva.esOfensivo // Solo toxicidad para PDFs
-    : !deteccionOfensiva.esOfensivo && coherencia.tieneSentido; // Ambos para general
+  // ✅ CRITERIOS CLAROS Y CONSISTENTES
+  let esAprobado = true;
+  let razon = 'Contenido aprobado';
+
+  // Verificar toxicidad primero (aplica para ambos contextos)
+  if (deteccionOfensiva.esOfensivo) {
+    esAprobado = false;
+    razon = deteccionOfensiva.razon;
+  }
+  // Para contexto general, también verificar coherencia
+  else if (contexto === 'general' && !coherencia.tieneSentido) {
+    esAprobado = false;
+    razon = `Contenido no aprobado: ${coherencia.razon}`;
+  }
 
   const puntuacion = this.calcularPuntuacionCombinada(
     { TOXICITY: deteccionOfensiva.esOfensivo ? 0.8 : 0.1 },
     coherencia,
     contexto
   );
-
-  // ✅ CORREGIDO: Generar razón de manera consistente
-  let razon: string;
-  if (!esAprobado) {
-    if (deteccionOfensiva.esOfensivo) {
-      razon = deteccionOfensiva.razon;
-    } else if (contexto === 'general' && !coherencia.tieneSentido) {
-      razon = coherencia.razon;
-    } else {
-      razon = 'Contenido no aprobado';
-    }
-  } else {
-    razon = `Contenido aprobado (${contexto})`;
-  }
 
   const detalles: DetallesAnalisisMejorado = {
     metodo: `fallback-local-con-coherencia-${contexto}`,
@@ -1082,7 +1074,7 @@ private usarFallbackConCoherencia(
     esAprobado,
     puntuacion,
     palabrasOfensivas: deteccionOfensiva.palabrasOfensivas,
-    razon, // ✅ Usar la razón generada consistentemente
+    razon, // ✅ Razón consistente
     detalles: detalles as AnalisisTexto['detalles']
   };
 }
