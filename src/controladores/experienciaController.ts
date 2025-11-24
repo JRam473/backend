@@ -119,7 +119,7 @@ const moderarNombreUsuario = async (
   }
 };
 
-// ✅ MOVER ESTA FUNCIÓN FUERA DEL CONTROLADOR (arriba, con las otras funciones auxiliares)
+
 
 /**
  * ✅ FUNCIÓN AUXILIAR: Limpiar mensajes de error para el frontend
@@ -393,19 +393,19 @@ async validarTextoPrev(req: Request, res: Response) {
 
  
 const mensajeLimpio = limpiarMensajeError(motivoDetallado || 'Contenido no aprobado');
-      
-      return res.status(400).json({
-        success: false,
-        error: 'TEXTO_RECHAZADO',
-        message: mensajeLimpio, // ✅ USAR MENSAJE LIMPIO
-        motivo: motivoDetallado,
-        detalles: {
-          puntuacion: resultadoModeracion.puntuacionGeneral,
-          problemas: detallesEspecificos,
-          sugerencias: generarSugerencias('texto'),
-          timestamp: new Date().toISOString()
-        }
-      });
+
+return res.status(400).json({
+  success: false,
+  error: 'TEXTO_RECHAZADO',
+  message: mensajeLimpio, // ✅ USAR MENSAJE LIMPIO
+  motivo: motivoDetallado,
+  detalles: {
+    puntuacion: resultadoModeracion.puntuacionGeneral,
+    problemas: detallesEspecificos,
+    sugerencias: generarSugerencias('texto'),
+    timestamp: new Date().toISOString()
+  }
+});
     }
 
     // ✅ SI TODO ES APROBADO
