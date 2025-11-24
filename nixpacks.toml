@@ -1,0 +1,9 @@
+[phases.setup]
+cmds = [
+  "apt-get update",
+  "apt-get install -y poppler-utils ghostscript imagemagick graphicsmagick",
+  "npm install"
+]
+
+[phases.build]
+cmds = ["npm run build"]

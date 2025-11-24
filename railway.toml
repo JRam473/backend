@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm run build"
+
+[build.nixpacks]
+configFiles = [".nixpacks.toml"]
+
+[deploy]
+startCommand = "npm run start"
+healthcheckPath = "/health"
