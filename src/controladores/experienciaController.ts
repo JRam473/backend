@@ -66,7 +66,7 @@ const analizarMotivoRechazo = (resultadoModeracion: any): {
   return { mensajeUsuario, tipoProblema, detallesEspecificos };
 };
 
-// ✅ FUNCIÓN PARA MODERAR NOMBRE DE USUARIO (se mantiene igual)
+// ✅ FUNCIÓN PARA MODERAR NOMBRE DE USUARIO (CORREGIDA)
 const moderarNombreUsuario = async (
   nombreUsuario: string | undefined, 
   ipUsuario: string, 
@@ -121,36 +121,6 @@ const moderarNombreUsuario = async (
 
 
 
-/**
- * ✅ FUNCIÓN AUXILIAR: Limpiar mensajes de error para el frontend
- */
-const limpiarMensajeError = (mensaje: string): string => {
-  if (!mensaje) return 'Contenido no aprobado';
-  
-  // ✅ ELIMINAR CONTRADICCIONES Y DUPLICADOS
-  let mensajeLimpio = mensaje
-    .replace(/Contenido aprobado/g, '') // Eliminar "Contenido aprobado" si está presente
-    .replace(/Contenido no aprobado/g, 'Contenido no aprobado') // Mantener solo uno
-    .replace(/\s+/g, ' ') // Eliminar espacios múltiples
-    .trim();
-  
-  // ✅ SI QUEDA VACÍO, USAR MENSAJE POR DEFECTO
-  if (!mensajeLimpio) {
-    return 'Contenido no aprobado';
-  }
-  
-  // ✅ GARANTIZAR QUE EMPIECE CON "Contenido no aprobado"
-  if (!mensajeLimpio.startsWith('Contenido no aprobado')) {
-    mensajeLimpio = `Contenido no aprobado: ${mensajeLimpio}`;
-  }
-  
-  // ✅ ELIMINAR DUPLICADOS AL FINAL
-  mensajeLimpio = mensajeLimpio
-    .replace(/(Contenido no aprobado: )+/g, 'Contenido no aprobado: ')
-    .replace(/(Contenido no aprobado)+/g, 'Contenido no aprobado');
-  
-  return mensajeLimpio;
-};
 
 export const experienciaController = {
   /**
@@ -273,6 +243,8 @@ export const experienciaController = {
  * ✅ NUEVO: Validar texto Y nombre de usuario antes de subir archivos multimedia
  */
 
+// En el método validarTextoPrev del controlador - CORREGIR VERIFICACIÓN DE TIPOS
+
 async validarTextoPrev(req: Request, res: Response) {
   try {
     const { texto, nombre_usuario } = req.body;
@@ -309,18 +281,16 @@ async validarTextoPrev(req: Request, res: Response) {
       
       let detallesEspecificos: string[] = [];
       
-      if (resultadoModeracionNombre.detalles?.texto) {
+      // ✅ CORREGIDO: Verificar que detalles.texto existe
+      if (resultadoModeracionNombre.detalles?.texto?.palabrasOfensivas?.length > 0) {
         const texto = resultadoModeracionNombre.detalles.texto;
-        if (texto.palabrasOfensivas?.length > 0) {
-          detallesEspecificos.push(`Palabras problemáticas: ${texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
-        }
+        detallesEspecificos.push(`Palabras problemáticas: ${texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
       }
 
       return res.status(400).json({
         success: false,
         error: 'NOMBRE_USUARIO_RECHAZADO',
-        message: 'El nombre de usuario no cumple con las políticas de contenido',
-        motivo: resultadoModeracionNombre.motivoRechazo,
+        message: resultadoModeracionNombre.motivoRechazo || 'El nombre de usuario no cumple con las políticas de contenido',
         tipo: 'nombre_usuario',
         detalles: {
           problemas: detallesEspecificos,
@@ -337,75 +307,33 @@ async validarTextoPrev(req: Request, res: Response) {
       hashNavegador
     );
 
-    // ✅ CORREGIDO: CAPTURAR CORRECTAMENTE EL MOTIVO DE RECHAZO
+    // ✅ CORREGIDO: USAR DIRECTAMENTE EL RESULTADO SIN PROCESAMIENTOS COMPLEJOS
     if (!resultadoModeracion.esAprobado) {
       console.log('❌ Texto rechazado en validación previa:', resultadoModeracion.motivoRechazo);
       
-      // ✅ BUSCAR EL LOG MÁS RECIENTE PARA OBTENER DETALLES ESPECÍFICOS
-      const logReciente = await pool.query(
-        `SELECT motivo, resultado_moderacion 
-         FROM logs_moderacion 
-         WHERE hash_navegador = $1 
-         ORDER BY creado_en DESC 
-         LIMIT 1`,
-        [hashNavegador]
-      );
-
-      let motivoDetallado = resultadoModeracion.motivoRechazo;
-      let detallesEspecificos: string[] = [];
-
-      if (logReciente.rows.length > 0) {
-        const log = logReciente.rows[0];
-        
-        // ✅ CORREGIDO: USAR EL MOTIVO DEL LOG DIRECTAMENTE
-        motivoDetallado = log.motivo || resultadoModeracion.motivoRechazo;
-        
-        // ✅ CORREGIDO: PROCESAR CORRECTAMENTE EL RESULTADO DE MODERACIÓN
-        try {
-          let resultadoModeracionObj;
-          
-          if (typeof log.resultado_moderacion === 'string') {
-            resultadoModeracionObj = JSON.parse(log.resultado_moderacion);
-          } else {
-            resultadoModeracionObj = log.resultado_moderacion;
-          }
-          
-          // ✅ EXTRAER INFORMACIÓN ESPECÍFICA DEL ANÁLISIS
-          if (resultadoModeracionObj && resultadoModeracionObj.analisisTexto) {
-            const analisis = resultadoModeracionObj.analisisTexto;
-            
-            if (analisis.palabrasOfensivas?.length > 0) {
-              detallesEspecificos.push(`${analisis.palabrasOfensivas.length} palabras ofensivas detectadas`);
-              detallesEspecificos.push(`Ejemplos: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
-            }
-            
-            // ✅ CORREGIDO: USAR LA RAZÓN DEL ANÁLISIS, NO CONCATENAR
-            if (analisis.razon && !analisis.razon.includes('Contenido aprobado')) {
-              detallesEspecificos.push(analisis.razon);
-            }
-          }
-        } catch (error) {
-          console.error('Error procesando resultado moderación:', error);
-          // ✅ FALLBACK SEGURO
-          detallesEspecificos.push('Lenguaje inapropiado detectado');
-        }
+      const detallesEspecificos: string[] = [];
+      
+      // ✅ CORREGIDO: Verificar que detalles.texto existe antes de acceder a sus propiedades
+      if (resultadoModeracion.detalles?.texto?.palabrasOfensivas && 
+          resultadoModeracion.detalles.texto.palabrasOfensivas.length > 0) {
+        detallesEspecificos.push(`Palabras problemáticas: ${resultadoModeracion.detalles.texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
       }
 
- 
-const mensajeLimpio = limpiarMensajeError(motivoDetallado || 'Contenido no aprobado');
+      // ✅ USAR DIRECTAMENTE EL MOTIVO DE RECHAZO
+      const mensajeFinal = resultadoModeracion.motivoRechazo || 'Contenido no aprobado';
 
-return res.status(400).json({
-  success: false,
-  error: 'TEXTO_RECHAZADO',
-  message: mensajeLimpio, // ✅ USAR MENSAJE LIMPIO
-  motivo: motivoDetallado,
-  detalles: {
-    puntuacion: resultadoModeracion.puntuacionGeneral,
-    problemas: detallesEspecificos,
-    sugerencias: generarSugerencias('texto'),
-    timestamp: new Date().toISOString()
-  }
-});
+      return res.status(400).json({
+        success: false,
+        error: 'TEXTO_RECHAZADO',
+        message: mensajeFinal,
+        motivo: mensajeFinal,
+        detalles: {
+          puntuacion: resultadoModeracion.puntuacionGeneral,
+          problemas: detallesEspecificos,
+          sugerencias: generarSugerencias('texto'),
+          timestamp: new Date().toISOString()
+        }
+      });
     }
 
     // ✅ SI TODO ES APROBADO
@@ -433,7 +361,6 @@ return res.status(400).json({
     });
   }
 },
-
 
 
   /**
@@ -573,155 +500,153 @@ return res.status(400).json({
     }
   },
 
-  /**
-   * Editar experiencia con moderación DE TEXTO Y NOMBRE DE USUARIO
-   */
-  async editarExperiencia(req: Request, res: Response) {
-    try {
-      const { id } = req.params;
-      const { descripcion, nombre_usuario } = req.body;
+/**
+ * Editar experiencia con moderación DE TEXTO Y NOMBRE DE USUARIO (CORREGIDO)
+ */
+async editarExperiencia(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const { descripcion, nombre_usuario } = req.body;
 
-      const hashNavegador = generarHashNavegador(req);
+    const hashNavegador = generarHashNavegador(req);
 
-      // Verificar que la experiencia existe y pertenece al usuario
-      const experienciaActual = await pool.query(
-        'SELECT * FROM experiencias WHERE id = $1 AND hash_navegador = $2',
-        [id, hashNavegador]
-      );
+    // Verificar que la experiencia existe y pertenece al usuario
+    const experienciaActual = await pool.query(
+      'SELECT * FROM experiencias WHERE id = $1 AND hash_navegador = $2',
+      [id, hashNavegador]
+    );
 
-      if (experienciaActual.rows.length === 0) {
-        return res.status(404).json({ 
-          success: false,
-          error: 'Experiencia no encontrada o no tienes permisos para editarla' 
-        });
-      }
-
-      const actual = experienciaActual.rows[0];
-      const moderacionService = new ModeracionService();
-
-      // ✅ 1. MODERAR NOMBRE DE USUARIO SI SE ACTUALIZA
-      if (nombre_usuario !== undefined && nombre_usuario !== actual.nombre_usuario) {
-        const resultadoModeracionNombre = await moderarNombreUsuario(
-          nombre_usuario,
-          actual.ip_usuario,
-          hashNavegador,
-          moderacionService
-        );
-
-        if (!resultadoModeracionNombre.esAprobado) {
-          let detallesEspecificos: string[] = [];
-          
-          if (resultadoModeracionNombre.detalles?.texto) {
-            const texto = resultadoModeracionNombre.detalles.texto;
-            if (texto.palabrasOfensivas?.length > 0) {
-              detallesEspecificos.push(`Palabras problemáticas: ${texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
-            }
-          }
-
-          return res.status(400).json({
-            success: false,
-            error: 'NOMBRE_USUARIO_RECHAZADO',
-            message: 'El nombre de usuario no cumple con las políticas de contenido',
-            motivo: resultadoModeracionNombre.motivoRechazo,
-            tipo: 'nombre_usuario',
-            detalles: {
-              problemas: detallesEspecificos,
-              sugerencias: generarSugerencias('nombre_usuario')
-            }
-          });
-        }
-      }
-
-      // ✅ 2. MODERAR DESCRIPCIÓN SI SE ACTUALIZA
-      if (descripcion !== undefined && descripcion !== actual.descripcion) {
-        const resultadoModeracion = await moderacionService.moderarContenidoEnTiempoReal({
-          texto: descripcion,
-          ipUsuario: actual.ip_usuario,
-          hashNavegador
-        });
-
-        // ✅ SI ES RECHAZADO: Responder inmediatamente con motivo específico
-        if (!resultadoModeracion.esAprobado) {
-          // ✅ MEJORADO: Buscar log reciente para detalles
-          const logReciente = await pool.query(
-            `SELECT motivo, resultado_moderacion 
-             FROM logs_moderacion 
-             WHERE hash_navegador = $1 
-             ORDER BY creado_en DESC 
-             LIMIT 1`,
-            [hashNavegador]
-          );
-
-          let motivoDetallado = resultadoModeracion.motivoRechazo;
-          let detallesEspecificos: string[] = [];
-
-          if (logReciente.rows.length > 0) {
-            const log = logReciente.rows[0];
-            motivoDetallado = log.motivo;
-            
-            try {
-              const resultado = JSON.parse(log.resultado_moderacion);
-              if (resultado.analisisTexto) {
-                const analisis = resultado.analisisTexto;
-                if (analisis.palabrasOfensivas?.length > 0) {
-                  detallesEspecificos.push(`Palabras problemáticas: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
-                }
-              }
-            } catch (error) {
-              console.error('Error parseando resultado moderación:', error);
-            }
-          }
-          
-          return res.status(400).json({
-            success: false,
-            error: 'CONTENIDO_RECHAZADO',
-            message: 'El texto no cumple con las políticas de contenido',
-            motivo: motivoDetallado,
-            tipo: 'texto',
-            detalles: {
-              puntuacion: resultadoModeracion.puntuacionGeneral,
-              problemas: detallesEspecificos,
-              sugerencias: generarSugerencias('texto')
-            }
-          });
-        }
-      }
-
-      // Actualizar experiencia
-      const nombreUsuarioFinal = nombre_usuario !== undefined ? 
-        (nombre_usuario?.trim() || 'Usuario Anónimo') : 
-        actual.nombre_usuario;
-
-      const result = await pool.query(
-        `UPDATE experiencias 
-         SET descripcion = $1, 
-             nombre_usuario = $2,
-             actualizado_en = NOW()
-         WHERE id = $3 AND hash_navegador = $4 
-         RETURNING *`,
-        [
-          descripcion !== undefined ? descripcion : actual.descripcion,
-          nombreUsuarioFinal,
-          id,
-          hashNavegador
-        ]
-      );
-
-      res.json({
-        success: true,
-        mensaje: 'Experiencia actualizada exitosamente.',
-        experiencia: result.rows[0]
-      });
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('Error editando experiencia:', errorMessage);
-      res.status(500).json({ 
+    if (experienciaActual.rows.length === 0) {
+      return res.status(404).json({ 
         success: false,
-        error: 'Error al editar experiencia' 
+        error: 'Experiencia no encontrada o no tienes permisos para editarla' 
       });
     }
-  },
+
+    const actual = experienciaActual.rows[0];
+    const moderacionService = new ModeracionService();
+
+    // ✅ 1. MODERAR NOMBRE DE USUARIO SI SE ACTUALIZA (CORREGIDO)
+    if (nombre_usuario !== undefined && nombre_usuario !== actual.nombre_usuario) {
+      const resultadoModeracionNombre = await moderarNombreUsuario(
+        nombre_usuario,
+        actual.ip_usuario,
+        hashNavegador,
+        moderacionService
+      );
+
+      if (!resultadoModeracionNombre.esAprobado) {
+        let detallesEspecificos: string[] = [];
+        
+        // ✅ CORREGIDO: Verificación segura de tipos
+        if (resultadoModeracionNombre.detalles?.texto?.palabrasOfensivas && 
+            resultadoModeracionNombre.detalles.texto.palabrasOfensivas.length > 0) {
+          detallesEspecificos.push(`Palabras problemáticas: ${resultadoModeracionNombre.detalles.texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: 'NOMBRE_USUARIO_RECHAZADO',
+          message: 'El nombre de usuario no cumple con las políticas de contenido',
+          motivo: resultadoModeracionNombre.motivoRechazo,
+          tipo: 'nombre_usuario',
+          detalles: {
+            problemas: detallesEspecificos,
+            sugerencias: generarSugerencias('nombre_usuario')
+          }
+        });
+      }
+    }
+
+    // ✅ 2. MODERAR DESCRIPCIÓN SI SE ACTUALIZA (CORREGIDO)
+    if (descripcion !== undefined && descripcion !== actual.descripcion) {
+      const resultadoModeracion = await moderacionService.moderarContenidoEnTiempoReal({
+        texto: descripcion,
+        ipUsuario: actual.ip_usuario,
+        hashNavegador
+      });
+
+      // ✅ SI ES RECHAZADO: Responder inmediatamente con motivo específico
+      if (!resultadoModeracion.esAprobado) {
+        // ✅ MEJORADO: Buscar log reciente para detalles
+        const logReciente = await pool.query(
+          `SELECT motivo, resultado_moderacion 
+           FROM logs_moderacion 
+           WHERE hash_navegador = $1 
+           ORDER BY creado_en DESC 
+           LIMIT 1`,
+          [hashNavegador]
+        );
+
+        let motivoDetallado = resultadoModeracion.motivoRechazo;
+        let detallesEspecificos: string[] = [];
+
+        if (logReciente.rows.length > 0) {
+          const log = logReciente.rows[0];
+          motivoDetallado = log.motivo;
+          
+          try {
+            const resultado = JSON.parse(log.resultado_moderacion);
+            // ✅ CORREGIDO: Verificación segura de tipos
+            if (resultado.analisisTexto?.palabrasOfensivas && 
+                resultado.analisisTexto.palabrasOfensivas.length > 0) {
+              detallesEspecificos.push(`Palabras problemáticas: ${resultado.analisisTexto.palabrasOfensivas.slice(0, 3).join(', ')}`);
+            }
+          } catch (error) {
+            console.error('Error parseando resultado moderación:', error);
+          }
+        }
+        
+        return res.status(400).json({
+          success: false,
+          error: 'CONTENIDO_RECHAZADO',
+          message: 'El texto no cumple con las políticas de contenido',
+          motivo: motivoDetallado,
+          tipo: 'texto',
+          detalles: {
+            puntuacion: resultadoModeracion.puntuacionGeneral,
+            problemas: detallesEspecificos,
+            sugerencias: generarSugerencias('texto')
+          }
+        });
+      }
+    }
+
+    // Actualizar experiencia
+    const nombreUsuarioFinal = nombre_usuario !== undefined ? 
+      (nombre_usuario?.trim() || 'Usuario Anónimo') : 
+      actual.nombre_usuario;
+
+    const result = await pool.query(
+      `UPDATE experiencias 
+       SET descripcion = $1, 
+           nombre_usuario = $2,
+           actualizado_en = NOW()
+       WHERE id = $3 AND hash_navegador = $4 
+       RETURNING *`,
+      [
+        descripcion !== undefined ? descripcion : actual.descripcion,
+        nombreUsuarioFinal,
+        id,
+        hashNavegador
+      ]
+    );
+
+    res.json({
+      success: true,
+      mensaje: 'Experiencia actualizada exitosamente.',
+      experiencia: result.rows[0]
+    });
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error editando experiencia:', errorMessage);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al editar experiencia' 
+    });
+  }
+},
 
 
 
@@ -1124,268 +1049,268 @@ async registrarVista(req: Request, res: Response) {
     }
   },
 
-  /**
-   * 🆕 EDITAR EXPERIENCIA CON IMAGEN - CLOUDINARY
-   */
-  async editarExperienciaConImagen(req: Request, res: Response) {
-    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
-    
-    try {
-      const { id } = req.params;
-      const { descripcion, nombre_usuario } = req.body;
-      const file = req.file;
-      const hashNavegador = generarHashNavegador(req);
+ /**
+ * 🆕 EDITAR EXPERIENCIA CON IMAGEN - CLOUDINARY (CORREGIDO)
+ */
+async editarExperienciaConImagen(req: Request, res: Response) {
+  const cloudinaryService = new CloudinaryService();
+  
+  try {
+    const { id } = req.params;
+    const { descripcion, nombre_usuario } = req.body;
+    const file = req.file;
+    const hashNavegador = generarHashNavegador(req);
 
-      console.log('🔄 Editando experiencia con imagen:', { 
-        id, 
-        tieneNuevaImagen: !!file,
-        descripcion: descripcion ? `"${descripcion.substring(0, 50)}..."` : 'undefined',
-        nombre_usuario: nombre_usuario ? `"${nombre_usuario}"` : 'undefined (sin cambios)'
-      });
+    console.log('🔄 Editando experiencia con imagen:', { 
+      id, 
+      tieneNuevaImagen: !!file,
+      descripcion: descripcion ? `"${descripcion.substring(0, 50)}..."` : 'undefined',
+      nombre_usuario: nombre_usuario ? `"${nombre_usuario}"` : 'undefined (sin cambios)'
+    });
 
-      // Verificar que la experiencia existe y pertenece al usuario
-      const experienciaActual = await pool.query(
-        'SELECT * FROM experiencias WHERE id = $1 AND hash_navegador = $2',
-        [id, hashNavegador]
-      );
+    // Verificar que la experiencia existe y pertenece al usuario
+    const experienciaActual = await pool.query(
+      'SELECT * FROM experiencias WHERE id = $1 AND hash_navegador = $2',
+      [id, hashNavegador]
+    );
 
-      if (experienciaActual.rows.length === 0) {
-        return res.status(404).json({ 
-          success: false,
-          error: 'Experiencia no encontrada o no tienes permisos para editarla' 
-        });
-      }
-
-      const actual = experienciaActual.rows[0];
-      const moderacionService = new ModeracionService();
-      const moderacionImagenService = new ModeracionImagenService();
-
-      // ✅ 1. MODERAR NOMBRE DE USUARIO SI SE ACTUALIZA
-      if (nombre_usuario !== undefined && nombre_usuario !== actual.nombre_usuario) {
-        const resultadoModeracionNombre = await moderarNombreUsuario(
-          nombre_usuario,
-          actual.ip_usuario,
-          hashNavegador,
-          moderacionService
-        );
-
-        if (!resultadoModeracionNombre.esAprobado) {
-          let detallesEspecificos: string[] = [];
-          
-          if (resultadoModeracionNombre.detalles?.texto) {
-            const texto = resultadoModeracionNombre.detalles.texto;
-            if (texto.palabrasOfensivas?.length > 0) {
-              detallesEspecificos.push(`Palabras problemáticas: ${texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
-            }
-          }
-
-          return res.status(400).json({
-            success: false,
-            error: 'NOMBRE_USUARIO_RECHAZADO',
-            message: 'El nombre de usuario no cumple con las políticas de contenido',
-            motivo: resultadoModeracionNombre.motivoRechazo,
-            tipo: 'nombre_usuario',
-            detalles: {
-              problemas: detallesEspecificos,
-              sugerencias: generarSugerencias('nombre_usuario')
-            }
-          });
-        }
-      }
-
-      // ✅ 2. MODERAR DESCRIPCIÓN SI SE ACTUALIZA
-      if (descripcion !== undefined && descripcion !== actual.descripcion) {
-        const resultadoModeracion = await moderacionService.moderarContenidoEnTiempoReal({
-          texto: descripcion,
-          ipUsuario: actual.ip_usuario,
-          hashNavegador
-        });
-
-        if (!resultadoModeracion.esAprobado) {
-          const logReciente = await pool.query(
-            `SELECT motivo, resultado_moderacion 
-             FROM logs_moderacion 
-             WHERE hash_navegador = $1 
-             ORDER BY creado_en DESC 
-             LIMIT 1`,
-            [hashNavegador]
-          );
-
-          let motivoDetallado = resultadoModeracion.motivoRechazo;
-          let detallesEspecificos: string[] = [];
-
-          if (logReciente.rows.length > 0) {
-            const log = logReciente.rows[0];
-            motivoDetallado = log.motivo;
-            
-            try {
-              const resultado = JSON.parse(log.resultado_moderacion);
-              if (resultado.analisisTexto) {
-                const analisis = resultado.analisisTexto;
-                if (analisis.palabrasOfensivas?.length > 0) {
-                  detallesEspecificos.push(`Palabras problemáticas: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
-                }
-              }
-            } catch (error) {
-              console.error('Error parseando resultado moderación:', error);
-            }
-          }
-          
-          return res.status(400).json({
-            success: false,
-            error: 'CONTENIDO_RECHAZADO',
-            message: 'El texto no cumple con las políticas de contenido',
-            motivo: motivoDetallado,
-            tipo: 'texto',
-            detalles: {
-              puntuacion: resultadoModeracion.puntuacionGeneral,
-              problemas: detallesEspecificos,
-              sugerencias: generarSugerencias('texto')
-            }
-          });
-        }
-      }
-
-      // ✅ MODERACIÓN Y SUBIDA DE NUEVA IMAGEN A CLOUDINARY
-      let nuevaUrlFoto = actual.url_foto;
-      let nuevaRutaAlmacenamiento = actual.ruta_almacenamiento;
-
-      if (file) {
-        console.log('🖼️ Procesando nueva imagen para experiencia:', id);
-        
-        // Leer archivo y moderar
-        const fileBuffer = await fs.readFile(file.path);
-        const resultadoModeracionImagen = await moderacionImagenService.moderarImagenDesdeBuffer(
-          fileBuffer,
-          file.filename,
-          actual.ip_usuario,
-          hashNavegador
-        );
-
-        if (!resultadoModeracionImagen.esAprobado) {
-          await fs.unlink(file.path);
-          return res.status(400).json({
-            success: false,
-            error: 'IMAGEN_RECHAZADA',
-            message: 'La imagen no cumple con las políticas de contenido',
-            motivo: resultadoModeracionImagen.motivoRechazo,
-            tipo: 'imagen',
-            detalles: {
-              puntuacion: resultadoModeracionImagen.puntuacionRiesgo,
-              problemas: [resultadoModeracionImagen.motivoRechazo || 'Contenido inapropiado detectado'],
-              sugerencias: [
-                'Asegúrate de que la imagen no contenga contenido violento o gráfico',
-                'No incluyas armas o elementos peligrosos',
-                'Usa imágenes apropiadas para todas las edades'
-              ],
-              timestamp: new Date().toISOString()
-            }
-          });
-        }
-
-        // Subir nueva imagen a Cloudinary
-        const cloudinaryResult = await cloudinaryService.subirArchivo(
-          fileBuffer,
-          file.filename,
-          process.env.CLOUDINARY_EXPERIENCIAS_FOLDER || 'experiencias'
-        );
-
-        // Limpiar archivo temporal
-        await fs.unlink(file.path);
-
-        // ✅ ELIMINAR IMAGEN ANTERIOR DE CLOUDINARY
-        if (actual.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(actual.url_foto)) {
-          try {
-            await cloudinaryService.eliminarArchivo(actual.ruta_almacenamiento);
-            console.log('🗑️ Imagen anterior eliminada de Cloudinary:', actual.ruta_almacenamiento);
-          } catch (error) {
-            console.warn('⚠️ No se pudo eliminar la imagen anterior de Cloudinary:', error);
-          }
-        }
-
-        // Actualizar URLs
-        nuevaUrlFoto = cloudinaryResult.secure_url;
-        nuevaRutaAlmacenamiento = cloudinaryResult.public_id;
-      }
-
-      // ✅ ACTUALIZAR EXPERIENCIA EN LA BASE DE DATOS
-      const nombreUsuarioFinal = nombre_usuario !== undefined ? 
-        (nombre_usuario?.trim() || 'Usuario Anónimo') : 
-        actual.nombre_usuario;
-
-      const descripcionFinal = descripcion !== undefined ? descripcion : actual.descripcion;
-
-      let experienciaActualizada;
-
-      if (file) {
-        // Si hay nueva imagen, actualizar campos de archivo
-        const result = await pool.query(
-          `UPDATE experiencias 
-           SET descripcion = $1,
-               url_foto = $2,
-               ruta_almacenamiento = $3,
-               nombre_usuario = $4,
-               actualizado_en = NOW()
-           WHERE id = $5 AND hash_navegador = $6 
-           RETURNING *`,
-          [
-            descripcionFinal,
-            nuevaUrlFoto,
-            nuevaRutaAlmacenamiento,
-            nombreUsuarioFinal,
-            id,
-            hashNavegador
-          ]
-        );
-
-        experienciaActualizada = result.rows[0];
-      } else {
-        // Si no hay archivo, actualizar sin campos de archivo
-        const result = await pool.query(
-          `UPDATE experiencias 
-           SET descripcion = $1,
-               nombre_usuario = $2,
-               actualizado_en = NOW()
-           WHERE id = $3 AND hash_navegador = $4 
-           RETURNING *`,
-          [
-            descripcionFinal,
-            nombreUsuarioFinal,
-            id,
-            hashNavegador
-          ]
-        );
-
-        experienciaActualizada = result.rows[0];
-      }
-
-      console.log('✅ Experiencia actualizada en Cloudinary:', {
-        id: experienciaActualizada.id,
-        nuevaImagen: !!file,
-        descripcionCambiada: descripcion !== actual.descripcion,
-        nombreUsuarioCambiado: nombre_usuario !== actual.nombre_usuario
-      });
-
-      res.json({
-        success: true,
-        mensaje: file 
-          ? 'Experiencia e imagen actualizadas exitosamente.' 
-          : 'Experiencia actualizada exitosamente.',
-        experiencia: experienciaActualizada
-      });
-
-    } catch (error) {
-      // Limpiar archivo en caso de error
-      if (req.file) {
-        await fs.unlink(req.file.path).catch(console.error);
-      }
-      
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('❌ Error editando experiencia con imagen:', errorMessage);
-      res.status(500).json({ 
+    if (experienciaActual.rows.length === 0) {
+      return res.status(404).json({ 
         success: false,
-        error: 'Error al editar experiencia' 
+        error: 'Experiencia no encontrada o no tienes permisos para editarla' 
       });
     }
+
+    const actual = experienciaActual.rows[0];
+    const moderacionService = new ModeracionService();
+    const moderacionImagenService = new ModeracionImagenService();
+
+    // ✅ 1. MODERAR NOMBRE DE USUARIO SI SE ACTUALIZA (CORREGIDO)
+    if (nombre_usuario !== undefined && nombre_usuario !== actual.nombre_usuario) {
+      const resultadoModeracionNombre = await moderarNombreUsuario(
+        nombre_usuario,
+        actual.ip_usuario,
+        hashNavegador,
+        moderacionService
+      );
+
+      if (!resultadoModeracionNombre.esAprobado) {
+        let detallesEspecificos: string[] = [];
+        
+        // ✅ CORREGIDO: Verificación segura de tipos
+        if (resultadoModeracionNombre.detalles?.texto?.palabrasOfensivas && 
+            resultadoModeracionNombre.detalles.texto.palabrasOfensivas.length > 0) {
+          detallesEspecificos.push(`Palabras problemáticas: ${resultadoModeracionNombre.detalles.texto.palabrasOfensivas.slice(0, 3).join(', ')}`);
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: 'NOMBRE_USUARIO_RECHAZADO',
+          message: 'El nombre de usuario no cumple con las políticas de contenido',
+          motivo: resultadoModeracionNombre.motivoRechazo,
+          tipo: 'nombre_usuario',
+          detalles: {
+            problemas: detallesEspecificos,
+            sugerencias: generarSugerencias('nombre_usuario')
+          }
+        });
+      }
+    }
+
+    // ✅ 2. MODERAR DESCRIPCIÓN SI SE ACTUALIZA (CORREGIDO)
+    if (descripcion !== undefined && descripcion !== actual.descripcion) {
+      const resultadoModeracion = await moderacionService.moderarContenidoEnTiempoReal({
+        texto: descripcion,
+        ipUsuario: actual.ip_usuario,
+        hashNavegador
+      });
+
+      if (!resultadoModeracion.esAprobado) {
+        const logReciente = await pool.query(
+          `SELECT motivo, resultado_moderacion 
+           FROM logs_moderacion 
+           WHERE hash_navegador = $1 
+           ORDER BY creado_en DESC 
+           LIMIT 1`,
+          [hashNavegador]
+        );
+
+        let motivoDetallado = resultadoModeracion.motivoRechazo;
+        let detallesEspecificos: string[] = [];
+
+        if (logReciente.rows.length > 0) {
+          const log = logReciente.rows[0];
+          motivoDetallado = log.motivo;
+          
+          try {
+            const resultado = JSON.parse(log.resultado_moderacion);
+            // ✅ CORREGIDO: Verificación segura de tipos
+            if (resultado.analisisTexto?.palabrasOfensivas && 
+                resultado.analisisTexto.palabrasOfensivas.length > 0) {
+              detallesEspecificos.push(`Palabras problemáticas: ${resultado.analisisTexto.palabrasOfensivas.slice(0, 3).join(', ')}`);
+            }
+          } catch (error) {
+            console.error('Error parseando resultado moderación:', error);
+          }
+        }
+        
+        return res.status(400).json({
+          success: false,
+          error: 'CONTENIDO_RECHAZADO',
+          message: 'El texto no cumple con las políticas de contenido',
+          motivo: motivoDetallado,
+          tipo: 'texto',
+          detalles: {
+            puntuacion: resultadoModeracion.puntuacionGeneral,
+            problemas: detallesEspecificos,
+            sugerencias: generarSugerencias('texto')
+          }
+        });
+      }
+    }
+
+    // ✅ MODERACIÓN Y SUBIDA DE NUEVA IMAGEN A CLOUDINARY
+    let nuevaUrlFoto = actual.url_foto;
+    let nuevaRutaAlmacenamiento = actual.ruta_almacenamiento;
+
+    if (file) {
+      console.log('🖼️ Procesando nueva imagen para experiencia:', id);
+      
+      // Leer archivo y moderar
+      const fileBuffer = await fs.readFile(file.path);
+      const resultadoModeracionImagen = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        file.filename,
+        actual.ip_usuario,
+        hashNavegador
+      );
+
+      if (!resultadoModeracionImagen.esAprobado) {
+        await fs.unlink(file.path);
+        return res.status(400).json({
+          success: false,
+          error: 'IMAGEN_RECHAZADA',
+          message: 'La imagen no cumple con las políticas de contenido',
+          motivo: resultadoModeracionImagen.motivoRechazo,
+          tipo: 'imagen',
+          detalles: {
+            puntuacion: resultadoModeracionImagen.puntuacionRiesgo,
+            problemas: [resultadoModeracionImagen.motivoRechazo || 'Contenido inapropiado detectado'],
+            sugerencias: [
+              'Asegúrate de que la imagen no contenga contenido violento o gráfico',
+              'No incluyas armas o elementos peligrosos',
+              'Usa imágenes apropiadas para todas las edades'
+            ],
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+
+      // Subir nueva imagen a Cloudinary
+      const cloudinaryResult = await cloudinaryService.subirArchivo(
+        fileBuffer,
+        file.filename,
+        process.env.CLOUDINARY_EXPERIENCIAS_FOLDER || 'experiencias'
+      );
+
+      // Limpiar archivo temporal
+      await fs.unlink(file.path);
+
+      // ✅ ELIMINAR IMAGEN ANTERIOR DE CLOUDINARY
+      if (actual.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(actual.url_foto)) {
+        try {
+          await cloudinaryService.eliminarArchivo(actual.ruta_almacenamiento);
+          console.log('🗑️ Imagen anterior eliminada de Cloudinary:', actual.ruta_almacenamiento);
+        } catch (error) {
+          console.warn('⚠️ No se pudo eliminar la imagen anterior de Cloudinary:', error);
+        }
+      }
+
+      // Actualizar URLs
+      nuevaUrlFoto = cloudinaryResult.secure_url;
+      nuevaRutaAlmacenamiento = cloudinaryResult.public_id;
+    }
+
+    // ✅ ACTUALIZAR EXPERIENCIA EN LA BASE DE DATOS
+    const nombreUsuarioFinal = nombre_usuario !== undefined ? 
+      (nombre_usuario?.trim() || 'Usuario Anónimo') : 
+      actual.nombre_usuario;
+
+    const descripcionFinal = descripcion !== undefined ? descripcion : actual.descripcion;
+
+    let experienciaActualizada;
+
+    if (file) {
+      // Si hay nueva imagen, actualizar campos de archivo
+      const result = await pool.query(
+        `UPDATE experiencias 
+         SET descripcion = $1,
+             url_foto = $2,
+             ruta_almacenamiento = $3,
+             nombre_usuario = $4,
+             actualizado_en = NOW()
+         WHERE id = $5 AND hash_navegador = $6 
+         RETURNING *`,
+        [
+          descripcionFinal,
+          nuevaUrlFoto,
+          nuevaRutaAlmacenamiento,
+          nombreUsuarioFinal,
+          id,
+          hashNavegador
+        ]
+      );
+
+      experienciaActualizada = result.rows[0];
+    } else {
+      // Si no hay archivo, actualizar sin campos de archivo
+      const result = await pool.query(
+        `UPDATE experiencias 
+         SET descripcion = $1,
+             nombre_usuario = $2,
+             actualizado_en = NOW()
+         WHERE id = $3 AND hash_navegador = $4 
+         RETURNING *`,
+        [
+          descripcionFinal,
+          nombreUsuarioFinal,
+          id,
+          hashNavegador
+        ]
+      );
+
+      experienciaActualizada = result.rows[0];
+    }
+
+    console.log('✅ Experiencia actualizada en Cloudinary:', {
+      id: experienciaActualizada.id,
+      nuevaImagen: !!file,
+      descripcionCambiada: descripcion !== actual.descripcion,
+      nombreUsuarioCambiado: nombre_usuario !== actual.nombre_usuario
+    });
+
+    res.json({
+      success: true,
+      mensaje: file 
+        ? 'Experiencia e imagen actualizadas exitosamente.' 
+        : 'Experiencia actualizada exitosamente.',
+      experiencia: experienciaActualizada
+    });
+
+  } catch (error) {
+    // Limpiar archivo en caso de error
+    if (req.file) {
+      await fs.unlink(req.file.path).catch(console.error);
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('❌ Error editando experiencia con imagen:', errorMessage);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al editar experiencia' 
+    });
   }
+},
+
+
 };
