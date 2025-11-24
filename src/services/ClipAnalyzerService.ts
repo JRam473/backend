@@ -1,4 +1,4 @@
-// services/ClipAnalyzerService.ts - VERSIÓN CORREGIDA
+// services/ClipAnalyzerService.ts - VERSIÓN MÁS ESTRICTA
 // Usar importación dinámica para evitar problemas ESM
 
 export class ClipAnalyzerService {
@@ -64,9 +64,9 @@ export class ClipAnalyzerService {
         console.log(`   ${categoria}: ${(puntuacion * 100).toFixed(2)}%`);
       });
 
-      const esApto = this.calcularEsAptoPythonStyle(puntuaciones);
-      const puntuacionRiesgo = this.calcularPuntuacionRiesgoPythonStyle(puntuaciones);
-      const contenidoDetectado = this.obtenerContenidoDetectadoPythonStyle(puntuaciones);
+      const esApto = this.calcularEsAptoEstricto(puntuaciones); // ✅ CAMBIADO A ESTRICTO
+      const puntuacionRiesgo = this.calcularPuntuacionRiesgoEstricto(puntuaciones); // ✅ CAMBIADO A ESTRICTO
+      const contenidoDetectado = this.obtenerContenidoDetectadoEstricto(puntuaciones); // ✅ CAMBIADO A ESTRICTO
 
       console.log(`📊 DECISIÓN FINAL: ${esApto ? '✅ APTO' : '❌ NO APTO'}`);
       console.log(`📈 Puntuación riesgo máximo: ${(puntuacionRiesgo * 100).toFixed(2)}%`);
@@ -83,7 +83,7 @@ export class ClipAnalyzerService {
       };
 
       if (!esApto) {
-        (resultadoFinal as any).razones_rechazo = this.obtenerRazonesRechazoPythonStyle(puntuaciones);
+        (resultadoFinal as any).razones_rechazo = this.obtenerRazonesRechazoEstricto(puntuaciones); // ✅ CAMBIADO A ESTRICTO
       }
 
       return resultadoFinal;
@@ -94,6 +94,7 @@ export class ClipAnalyzerService {
     }
   }
 
+  // ✅ MÉTODO ORIGINAL MANTENIDO (PARA COMPATIBILIDAD)
   private calcularEsAptoPythonStyle(puntuaciones: Record<string, number>): boolean {
     const categoriasPeligrosas = [
       "violence", "blood", "weapon", "gun", "knife",
@@ -124,7 +125,60 @@ export class ClipAnalyzerService {
     return esApto;
   }
 
+  // ✅ NUEVO MÉTODO ESTRICTO
+  private calcularEsAptoEstricto(puntuaciones: Record<string, number>): boolean {
+    const categoriasPeligrosas = [
+      "violence", "blood", "weapon", "gun", "knife",
+      "nudity", "sexual content", "drugs"
+    ];
+    
+    let contenidoPeligroso: any[] = [];
+    let maxRiesgo = 0.0;
+
+    categoriasPeligrosas.forEach(categoria => {
+      const probabilidad = puntuaciones[categoria] || 0;
+      
+      // ✅ UMBRAL MÁS ESTRICTO: 15% en lugar de 20%
+      if (probabilidad > 0.15) {
+        if (probabilidad > maxRiesgo) {
+          maxRiesgo = probabilidad;
+        }
+        
+        contenidoPeligroso.push({
+          concepto: categoria,
+          probabilidad: probabilidad
+        });
+      }
+    });
+
+    // ✅ CRITERIO MÁS ESTRICTO: 25% en lugar de 40%
+    const esApto = contenidoPeligroso.length === 0 || maxRiesgo < 0.25;
+    console.log(`🔍 Análisis Estricto: ${contenidoPeligroso.length} categorías peligrosas, max riesgo: ${(maxRiesgo * 100).toFixed(2)}%`);
+    console.log(`🎯 Umbrales: detección >15%, rechazo >25%`);
+
+    return esApto;
+  }
+
   private calcularPuntuacionRiesgoPythonStyle(puntuaciones: Record<string, number>): number {
+    const categoriasPeligrosas = [
+      "violence", "blood", "weapon", "gun", "knife",
+      "nudity", "sexual content", "drugs"
+    ];
+    
+    let maxRiesgo = 0.0;
+    
+    categoriasPeligrosas.forEach(categoria => {
+      const probabilidad = puntuaciones[categoria] || 0;
+      if (probabilidad > maxRiesgo) {
+        maxRiesgo = probabilidad;
+      }
+    });
+    
+    return maxRiesgo;
+  }
+
+  // ✅ NUEVO MÉTODO ESTRICTO
+  private calcularPuntuacionRiesgoEstricto(puntuaciones: Record<string, number>): number {
     const categoriasPeligrosas = [
       "violence", "blood", "weapon", "gun", "knife",
       "nudity", "sexual content", "drugs"
@@ -164,6 +218,30 @@ export class ClipAnalyzerService {
     return detectados;
   }
 
+  // ✅ NUEVO MÉTODO ESTRICTO
+  private obtenerContenidoDetectadoEstricto(puntuaciones: Record<string, number>): any[] {
+    const categoriasPeligrosas = [
+      "violence", "blood", "weapon", "gun", "knife",
+      "nudity", "sexual content", "drugs"
+    ];
+    
+    const detectados: any[] = [];
+    
+    categoriasPeligrosas.forEach(categoria => {
+      const probabilidad = puntuaciones[categoria] || 0;
+      
+      // ✅ UMBRAL MÁS ESTRICTO: 15% en lugar de 20%
+      if (probabilidad > 0.15) {
+        detectados.push({
+          concepto: categoria,
+          probabilidad: probabilidad
+        });
+      }
+    });
+    
+    return detectados;
+  }
+
   private obtenerRazonesRechazoPythonStyle(puntuaciones: Record<string, number>): string[] {
     const razones: string[] = [];
     const categoriasPeligrosas = [
@@ -176,6 +254,27 @@ export class ClipAnalyzerService {
       
       if (probabilidad > 0.2) {
         const nivel = probabilidad >= 0.4 ? 'ALTO RIESGO' : 'RIESGO MODERADO';
+        razones.push(`${categoria} (${Math.round(probabilidad * 100)}% - ${nivel})`);
+      }
+    });
+    
+    return razones;
+  }
+
+  // ✅ NUEVO MÉTODO ESTRICTO
+  private obtenerRazonesRechazoEstricto(puntuaciones: Record<string, number>): string[] {
+    const razones: string[] = [];
+    const categoriasPeligrosas = [
+      "violence", "blood", "weapon", "gun", "knife",
+      "nudity", "sexual content", "drugs"
+    ];
+    
+    categoriasPeligrosas.forEach(categoria => {
+      const probabilidad = puntuaciones[categoria] || 0;
+      
+      // ✅ UMBRAL MÁS ESTRICTO: 15% en lugar de 20%
+      if (probabilidad > 0.15) {
+        const nivel = probabilidad >= 0.25 ? 'ALTO RIESGO' : 'RIESGO MODERADO'; // ✅ 25% en lugar de 40%
         razones.push(`${categoria} (${Math.round(probabilidad * 100)}% - ${nivel})`);
       }
     });
