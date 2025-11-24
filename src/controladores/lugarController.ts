@@ -781,7 +781,7 @@ export const lugarController = {
 // En lugarController.ts - Método subirPDFTemporal mejorado
 
 /**
- * ✅ VERSIÓN MEJORADA: Subir PDF temporal con manejo completo
+ * ✅ VERSIÓN CORREGIDA: Subir PDF temporal con análisis ANTES de Cloudinary
  */
 async subirPDFTemporal(req: Request, res: Response) {
   const cloudinaryService = new CloudinaryService();
@@ -796,10 +796,31 @@ async subirPDFTemporal(req: Request, res: Response) {
       });
     }
 
+    console.log('📊 Detalles del archivo PDF:', {
+      nombre: req.file.filename,
+      tamaño: req.file.size,
+      mimetype: req.file.mimetype,
+      path: req.file.path
+    });
+
     const hashNavegador = generarHashNavegador(req);
     const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
 
-    // ✅ 1. ANÁLISIS PRIMERO (cuando el archivo temporal todavía existe)
+    // ✅ 1. VALIDACIÓN DE ARCHIVO PDF
+    if (req.file.mimetype !== 'application/pdf') {
+      await fsPromises.unlink(req.file.path);
+      return res.status(400).json({
+        success: false,
+        error: 'ARCHIVO_NO_PDF',
+        message: 'El archivo debe ser un PDF válido',
+        detalles: {
+          mimetype_recibido: req.file.mimetype,
+          mimetype_esperado: 'application/pdf'
+        }
+      });
+    }
+
+    // ✅ 2. ANÁLISIS DE CONTENIDO (ANTES de subir a Cloudinary)
     const pdfAnalysisService = new PdfAnalysisService();
     
     console.log('🔍 Validando PDF básico...');
@@ -811,18 +832,27 @@ async subirPDFTemporal(req: Request, res: Response) {
         success: false,
         error: 'PDF_INVALIDO',
         message: validacionBasica.error || 'PDF no válido',
-        detalles: validacionBasica
+        detalles: {
+          problemas: [validacionBasica.error || 'Archivo PDF no válido'],
+          sugerencias: [
+            'Asegúrate de que el archivo sea un PDF válido',
+            'Verifica que el PDF no esté corrupto',
+            'Intenta con otro archivo PDF'
+          ]
+        }
       });
     }
 
     console.log('✅ PDF válido, analizando contenido...');
+    
+    // ✅ ANÁLISIS SE HACE CON EL ARCHIVO TEMPORAL (req.file.path)
     const resultadoAnalisis = await pdfAnalysisService.analizarTextoPDF(
-      req.file.path,  // ✅ Archivo temporal todavía existe
+      req.file.path,  // ← Archivo temporal EXISTE en este punto
       ipUsuario,
       hashNavegador
     );
 
-    // ✅ 2. SI ES RECHAZADO POR MODERACIÓN
+    // ✅ 3. SI ES RECHAZADO POR MODERACIÓN - limpiar y responder
     if (!resultadoAnalisis.esAprobado) {
       console.log('❌ PDF rechazado por moderación:', resultadoAnalisis.motivo);
       await fsPromises.unlink(req.file.path);
@@ -833,13 +863,22 @@ async subirPDFTemporal(req: Request, res: Response) {
         message: 'El contenido del PDF no cumple con las políticas de moderación',
         motivo: resultadoAnalisis.motivo,
         tipo: 'pdf_texto',
-        detalles: resultadoAnalisis
+        detalles: {
+          puntuacion: resultadoAnalisis.puntuacion,
+          problemas: [resultadoAnalisis.motivo || 'Contenido inapropiado detectado'],
+          sugerencias: [
+            'Revisa que el PDF no contenga lenguaje ofensivo o inapropiado',
+            'Asegúrate de que el contenido sea apropiado para todos los públicos',
+            'Evita contenido promocional, spam o enlaces no permitidos'
+          ],
+          metadata: resultadoAnalisis.metadata
+        }
       });
     }
 
     console.log('✅ PDF aprobado por moderación, subiendo a Cloudinary...');
 
-    // ✅ 3. SOLO SI ES APROBADO, SUBIR A CLOUDINARY
+    // ✅ 4. SOLO SI ES APROBADO, SUBIR A CLOUDINARY
     const fileBuffer = await fsPromises.readFile(req.file.path);
     const cloudinaryResult = await cloudinaryService.subirPDF(
       fileBuffer,
@@ -847,26 +886,42 @@ async subirPDFTemporal(req: Request, res: Response) {
       process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs_lugares'
     );
 
-    // ✅ 4. LIMPIAR ARCHIVO TEMPORAL
+    // ✅ 5. LIMPIAR ARCHIVO TEMPORAL (después de subir a Cloudinary)
     await fsPromises.unlink(req.file.path);
 
     console.log('🎉 PDF procesado exitosamente:', {
       url: cloudinaryResult.secure_url,
-      public_id: cloudinaryResult.public_id
+      public_id: cloudinaryResult.public_id,
+      tamaño: cloudinaryResult.bytes
     });
 
+    // ✅ 6. VERIFICACIÓN FINAL DE ACCESO
+    const esAccesible = await cloudinaryService.verificarAccesoPDF(cloudinaryResult.secure_url);
+
+    // ✅ 7. RESPUESTA COMPLETA
     res.json({
       success: true,
       mensaje: 'PDF aprobado y subido exitosamente',
       url_pdf: cloudinaryResult.secure_url,
+      es_accesible: esAccesible,
       detalles_cloudinary: {
         public_id: cloudinaryResult.public_id,
-        folder: cloudinaryResult.folder
+        folder: cloudinaryResult.folder,
+        resource_type: cloudinaryResult.resource_type,
+        formato: cloudinaryResult.format,
+        bytes: cloudinaryResult.bytes
       },
       moderacion: {
         esAprobado: true,
-        puntuacion: resultadoAnalisis.puntuacion
-      }
+        puntuacion: resultadoAnalisis.puntuacion,
+        metadata: resultadoAnalisis.metadata
+      },
+      archivo: {
+        nombre: req.file.filename,
+        tamaño: req.file.size,
+        tipo: req.file.mimetype
+      },
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
@@ -876,6 +931,7 @@ async subirPDFTemporal(req: Request, res: Response) {
     if (req.file?.path) {
       try {
         await fsPromises.unlink(req.file.path);
+        console.log('🧹 Archivo temporal limpiado por error');
       } catch (unlinkError) {
         console.error('Error limpiando archivo temporal:', unlinkError);
       }
@@ -883,7 +939,8 @@ async subirPDFTemporal(req: Request, res: Response) {
     
     res.status(500).json({ 
       success: false,
-      error: 'Error interno al procesar PDF'
+      error: 'Error interno al procesar PDF',
+      detalle: process.env.NODE_ENV === 'development' ? error instanceof Error ? error.message : String(error) : 'Contacta al administrador'
     });
   }
 },
@@ -2006,158 +2063,158 @@ async eliminarLugar(req: Request, res: Response) {
 
   // controladores/lugarController.ts - AGREGAR este método
 
-  /**
-   * ✅ ACTUALIZADO: Subir PDF CON moderación Y Cloudinary
-   */
-  async subirPDFLugarConModeracion(req: Request, res: Response) {
-    const cloudinaryService = new CloudinaryService(); // 🆕 NUEVO
+/**
+ * ✅ ACTUALIZADO: Subir PDF CON moderación Y Cloudinary
+ */
+async subirPDFLugarConModeracion(req: Request, res: Response) {
+  const cloudinaryService = new CloudinaryService();
+  
+  try {
+    const { id } = req.params;
     
-    try {
-      const { id } = req.params;
-      
-      console.log('📄 Subiendo PDF con moderación Y CLOUDINARY para lugar:', id);
+    console.log('📄 Subiendo PDF con moderación Y CLOUDINARY para lugar:', id);
 
-      if (!req.file) {
-        return res.status(400).json({ 
-          success: false,
-          error: 'No se proporcionó ningún PDF' 
-        });
-      }
-
-      const hashNavegador = generarHashNavegador(req);
-      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-
-      // ✅ Análisis del PDF
-      const pdfAnalysisService = new PdfAnalysisService();
-      
-      const validacionBasica = await pdfAnalysisService.validarPDFBasico(req.file.path);
-      if (!validacionBasica.valido) {
-        await fsPromises.unlink(req.file.path);
-        return res.status(400).json({
-          success: false,
-          error: 'PDF_INVALIDO',
-          message: validacionBasica.error || 'PDF no válido',
-          detalles: {
-            problemas: [validacionBasica.error || 'Archivo PDF no válido'],
-            sugerencias: [
-              'Asegúrate de que el archivo sea un PDF válido',
-              'Verifica que el tamaño no supere los 10MB',
-              'Intenta con otro archivo PDF'
-            ]
-          }
-        });
-      }
-
-      console.log('✅ PDF válido, procediendo con análisis de contenido...');
-
-      // Análisis de contenido textual
-      const resultadoAnalisis = await pdfAnalysisService.analizarTextoPDF(
-        req.file.path,
-        ipUsuario,
-        hashNavegador
-      );
-
-      // ✅ SI EL PDF ES RECHAZADO
-      if (!resultadoAnalisis.esAprobado) {
-        console.log('❌ PDF rechazado por moderación:', resultadoAnalisis.motivo);
-        
-        await fsPromises.unlink(req.file.path);
-        
-        return res.status(400).json({
-          success: false,
-          error: 'PDF_RECHAZADO',
-          message: 'El contenido del PDF no cumple con las políticas de moderación',
-          motivo: resultadoAnalisis.motivo,
-          tipo: 'pdf_texto',
-          detalles: {
-            puntuacion: resultadoAnalisis.puntuacion,
-            problemas: [resultadoAnalisis.motivo || 'Contenido inapropiado detectado'],
-            sugerencias: [
-              'Revisa que el PDF no contenga lenguaje ofensivo o inapropiado',
-              'Asegúrate de que el contenido sea apropiado para todos los públicos',
-              'Evita contenido promocional, spam o enlaces no permitidos'
-            ],
-            metadata: resultadoAnalisis.metadata
-          }
-        });
-      }
-
-      console.log('✅ PDF aprobado por moderación');
-
-      // Verificar que el lugar existe
-      const lugarResult = await pool.query(
-        'SELECT id, nombre FROM lugares WHERE id = $1',
-        [id]
-      );
-
-      if (lugarResult.rows.length === 0) {
-        await fsPromises.unlink(req.file.path);
-        return res.status(404).json({ 
-          success: false,
-          error: 'Lugar no encontrado' 
-        });
-      }
-
-      // 🆕 NUEVO: SUBIR A CLOUDINARY
-      const fileBuffer = await fsPromises.readFile(req.file.path);
-      const cloudinaryResult = await cloudinaryService.subirArchivo(
-        fileBuffer,
-        req.file.filename,
-        process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs_lugares'
-      );
-
-      // 🆕 NUEVO: Limpiar archivo temporal
-      await fsPromises.unlink(req.file.path);
-
-      // 🆕 NUEVO: Actualizar BD con URL de Cloudinary
-      await pool.query(
-        'UPDATE lugares SET pdf_url = $1, actualizado_en = NOW() WHERE id = $2',
-        [cloudinaryResult.secure_url, id]  // ← URL de Cloudinary, no local
-      );
-
-      const lugar = lugarResult.rows[0];
-      console.log('✅ PDF subido y aprobado para lugar CON CLOUDINARY:', lugar.nombre);
-
-      res.json({
-        success: true,
-        mensaje: 'PDF subido y aprobado exitosamente',
-        url_pdf: cloudinaryResult.secure_url,  // ← URL de Cloudinary
-        moderacion: {
-          esAprobado: true,
-          puntuacion: resultadoAnalisis.puntuacion,
-          metadata: resultadoAnalisis.metadata
-        },
-        archivo: {
-          nombre: req.file.filename,
-          tamaño: req.file.size,
-          tipo: req.file.mimetype,
-          public_id: cloudinaryResult.public_id
-        },
-        cloudinary: {
-          public_id: cloudinaryResult.public_id,
-          folder: cloudinaryResult.folder,
-          resource_type: cloudinaryResult.resource_type
-        }
-      });
-
-    } catch (error) {
-      console.error('❌ Error subiendo PDF con moderación:', error);
-      
-      if (req.file?.path) {
-        try {
-          await fsPromises.unlink(req.file.path);
-        } catch (unlinkError) {
-          console.error('Error eliminando archivo:', unlinkError);
-        }
-      }
-      
-      res.status(500).json({ 
+    if (!req.file) {
+      return res.status(400).json({ 
         success: false,
-        error: 'Error al subir PDF',
-        detalle: error instanceof Error ? error.message : 'Error desconocido'
+        error: 'No se proporcionó ningún PDF' 
       });
     }
-  },
+
+    const hashNavegador = generarHashNavegador(req);
+    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+    // ✅ ANÁLISIS DEL PDF (ANTES de Cloudinary)
+    const pdfAnalysisService = new PdfAnalysisService();
+    
+    const validacionBasica = await pdfAnalysisService.validarPDFBasico(req.file.path);
+    if (!validacionBasica.valido) {
+      await fsPromises.unlink(req.file.path);
+      return res.status(400).json({
+        success: false,
+        error: 'PDF_INVALIDO',
+        message: validacionBasica.error || 'PDF no válido',
+        detalles: {
+          problemas: [validacionBasica.error || 'Archivo PDF no válido'],
+          sugerencias: [
+            'Asegúrate de que el archivo sea un PDF válido',
+            'Verifica que el tamaño no supere los 10MB',
+            'Intenta con otro archivo PDF'
+          ]
+        }
+      });
+    }
+
+    console.log('✅ PDF válido, procediendo con análisis de contenido...');
+
+    // ✅ ANÁLISIS CON ARCHIVO TEMPORAL
+    const resultadoAnalisis = await pdfAnalysisService.analizarTextoPDF(
+      req.file.path,  // ← Archivo temporal existe
+      ipUsuario,
+      hashNavegador
+    );
+
+    // ✅ SI EL PDF ES RECHAZADO
+    if (!resultadoAnalisis.esAprobado) {
+      console.log('❌ PDF rechazado por moderación:', resultadoAnalisis.motivo);
+      
+      await fsPromises.unlink(req.file.path);
+      
+      return res.status(400).json({
+        success: false,
+        error: 'PDF_RECHAZADO',
+        message: 'El contenido del PDF no cumple con las políticas de moderación',
+        motivo: resultadoAnalisis.motivo,
+        tipo: 'pdf_texto',
+        detalles: {
+          puntuacion: resultadoAnalisis.puntuacion,
+          problemas: [resultadoAnalisis.motivo || 'Contenido inapropiado detectado'],
+          sugerencias: [
+            'Revisa que el PDF no contenga lenguaje ofensivo o inapropiado',
+            'Asegúrate de que el contenido sea apropiado para todos los públicos',
+            'Evita contenido promocional, spam o enlaces no permitidos'
+          ],
+          metadata: resultadoAnalisis.metadata
+        }
+      });
+    }
+
+    console.log('✅ PDF aprobado por moderación');
+
+    // Verificar que el lugar existe
+    const lugarResult = await pool.query(
+      'SELECT id, nombre FROM lugares WHERE id = $1',
+      [id]
+    );
+
+    if (lugarResult.rows.length === 0) {
+      await fsPromises.unlink(req.file.path);
+      return res.status(404).json({ 
+        success: false,
+        error: 'Lugar no encontrado' 
+      });
+    }
+
+    // ✅ SUBIR A CLOUDINARY SOLO SI ES APROBADO
+    const fileBuffer = await fsPromises.readFile(req.file.path);
+    const cloudinaryResult = await cloudinaryService.subirArchivo(
+      fileBuffer,
+      req.file.filename,
+      process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs_lugares'
+    );
+
+    // ✅ LIMPIAR ARCHIVO TEMPORAL
+    await fsPromises.unlink(req.file.path);
+
+    // Actualizar BD con URL de Cloudinary
+    await pool.query(
+      'UPDATE lugares SET pdf_url = $1, actualizado_en = NOW() WHERE id = $2',
+      [cloudinaryResult.secure_url, id]
+    );
+
+    const lugar = lugarResult.rows[0];
+    console.log('✅ PDF subido y aprobado para lugar CON CLOUDINARY:', lugar.nombre);
+
+    res.json({
+      success: true,
+      mensaje: 'PDF subido y aprobado exitosamente',
+      url_pdf: cloudinaryResult.secure_url,
+      moderacion: {
+        esAprobado: true,
+        puntuacion: resultadoAnalisis.puntuacion,
+        metadata: resultadoAnalisis.metadata
+      },
+      archivo: {
+        nombre: req.file.filename,
+        tamaño: req.file.size,
+        tipo: req.file.mimetype,
+        public_id: cloudinaryResult.public_id
+      },
+      cloudinary: {
+        public_id: cloudinaryResult.public_id,
+        folder: cloudinaryResult.folder,
+        resource_type: cloudinaryResult.resource_type
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error subiendo PDF con moderación:', error);
+    
+    if (req.file?.path) {
+      try {
+        await fsPromises.unlink(req.file.path);
+      } catch (unlinkError) {
+        console.error('Error eliminando archivo:', unlinkError);
+      }
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al subir PDF',
+      detalle: error instanceof Error ? error.message : 'Error desconocido'
+    });
+  }
+},
 
 
   // Obtener galería de imágenes de un lugar - SIN CAMBIOS
