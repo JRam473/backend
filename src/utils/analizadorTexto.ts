@@ -973,28 +973,35 @@ export class AnalizadorTexto {
   /**
    * ✅ MODIFICADO: GENERAR RAZÓN COMBINADA CON CONTEXTO
    */
-  private generarRazonCombinada(
-    perspectiveScores: { [key: string]: number },
-    coherencia: { razon: string; tieneSentido: boolean },
-    contexto: 'pdf' | 'general'
-  ): string {
-    const categoriasToxicas = Object.entries(perspectiveScores)
-      .filter(([category, score]) => (score || 0) > 0.7)
-      .map(([category]) => this.traducirCategoria(category));
+  // En analizadorTexto.ts - CORREGIR EL MÉTODO generarRazonCombinada
 
-    if (categoriasToxicas.length > 0) {
-      return `Contenido no aprobado: ${categoriasToxicas.join(', ')}`;
-    }
-    
-    if (contexto === 'pdf') {
-      // ✅ PARA PDFs: No rechazar por falta de coherencia
-      return 'Contenido PDF aprobado (solo verificado toxicidad)';
-    } else if (!coherencia.tieneSentido) {
+private generarRazonCombinada(
+  perspectiveScores: { [key: string]: number },
+  coherencia: { razon: string; tieneSentido: boolean },
+  contexto: 'pdf' | 'general'
+): string {
+  const categoriasToxicas = Object.entries(perspectiveScores)
+    .filter(([category, score]) => (score || 0) > 0.7)
+    .map(([category]) => this.traducirCategoria(category));
+
+  // ✅ CORREGIDO: SI HAY TOXICIDAD, SIEMPRE DECIR "NO APROBADO"
+  if (categoriasToxicas.length > 0) {
+    return `Contenido no aprobado: ${categoriasToxicas.join(', ')}`;
+  }
+  
+  // ✅ CORREGIDO: LÓGICA CLARA SIN CONTRADICCIONES
+  if (contexto === 'pdf') {
+    // Para PDFs: solo verificar toxicidad
+    return 'Contenido aprobado';
+  } else {
+    // Para general: verificar ambos
+    if (!coherencia.tieneSentido) {
       return `Contenido no aprobado: ${coherencia.razon}`;
     } else {
       return 'Contenido aprobado';
     }
   }
+}
 
   /**
    * DETERMINAR INTENCIÓN COMBINADA

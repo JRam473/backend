@@ -6,6 +6,7 @@ import { ModeracionImagenService } from '../services/moderacionImagenService.js'
 import { CloudinaryService } from '../services/cloudinaryService.js'; // 🆕 NUEVO
 import { Request, Response } from 'express';
 import fs from 'fs/promises';
+import { constants } from 'buffer';
 
 // ✅ FUNCIONES AUXILIARES (se mantienen igual)
 const generarSugerencias = (tipoProblema: string): string[] => {
@@ -116,6 +117,39 @@ const moderarNombreUsuario = async (
     console.error('❌ Error en moderación de nombre de usuario:', error);
     return { esAprobado: true };
   }
+};
+
+// ✅ MOVER ESTA FUNCIÓN FUERA DEL CONTROLADOR (arriba, con las otras funciones auxiliares)
+
+/**
+ * ✅ FUNCIÓN AUXILIAR: Limpiar mensajes de error para el frontend
+ */
+const limpiarMensajeError = (mensaje: string): string => {
+  if (!mensaje) return 'Contenido no aprobado';
+  
+  // ✅ ELIMINAR CONTRADICCIONES Y DUPLICADOS
+  let mensajeLimpio = mensaje
+    .replace(/Contenido aprobado/g, '') // Eliminar "Contenido aprobado" si está presente
+    .replace(/Contenido no aprobado/g, 'Contenido no aprobado') // Mantener solo uno
+    .replace(/\s+/g, ' ') // Eliminar espacios múltiples
+    .trim();
+  
+  // ✅ SI QUEDA VACÍO, USAR MENSAJE POR DEFECTO
+  if (!mensajeLimpio) {
+    return 'Contenido no aprobado';
+  }
+  
+  // ✅ GARANTIZAR QUE EMPIECE CON "Contenido no aprobado"
+  if (!mensajeLimpio.startsWith('Contenido no aprobado')) {
+    mensajeLimpio = `Contenido no aprobado: ${mensajeLimpio}`;
+  }
+  
+  // ✅ ELIMINAR DUPLICADOS AL FINAL
+  mensajeLimpio = mensajeLimpio
+    .replace(/(Contenido no aprobado: )+/g, 'Contenido no aprobado: ')
+    .replace(/(Contenido no aprobado)+/g, 'Contenido no aprobado');
+  
+  return mensajeLimpio;
 };
 
 export const experienciaController = {
@@ -238,6 +272,7 @@ export const experienciaController = {
   /**
  * ✅ NUEVO: Validar texto Y nombre de usuario antes de subir archivos multimedia
  */
+
 async validarTextoPrev(req: Request, res: Response) {
   try {
     const { texto, nombre_usuario } = req.body;
@@ -302,11 +337,11 @@ async validarTextoPrev(req: Request, res: Response) {
       hashNavegador
     );
 
-    // ✅ SI ES RECHAZADO: Devolver motivo específico del log
+    // ✅ CORREGIDO: CAPTURAR CORRECTAMENTE EL MOTIVO DE RECHAZO
     if (!resultadoModeracion.esAprobado) {
       console.log('❌ Texto rechazado en validación previa:', resultadoModeracion.motivoRechazo);
       
-      // Buscar el log más reciente para obtener detalles específicos
+      // ✅ BUSCAR EL LOG MÁS RECIENTE PARA OBTENER DETALLES ESPECÍFICOS
       const logReciente = await pool.query(
         `SELECT motivo, resultado_moderacion 
          FROM logs_moderacion 
@@ -321,26 +356,32 @@ async validarTextoPrev(req: Request, res: Response) {
 
       if (logReciente.rows.length > 0) {
         const log = logReciente.rows[0];
-        motivoDetallado = log.motivo;
         
-        // ✅ CORRECCIÓN: Manejar correctamente el tipo de dato
+        // ✅ CORREGIDO: USAR EL MOTIVO DEL LOG DIRECTAMENTE
+        motivoDetallado = log.motivo || resultadoModeracion.motivoRechazo;
+        
+        // ✅ CORREGIDO: PROCESAR CORRECTAMENTE EL RESULTADO DE MODERACIÓN
         try {
-          let resultado;
+          let resultadoModeracionObj;
           
           if (typeof log.resultado_moderacion === 'string') {
-            resultado = JSON.parse(log.resultado_moderacion);
+            resultadoModeracionObj = JSON.parse(log.resultado_moderacion);
           } else {
-            resultado = log.resultado_moderacion; // Ya es objeto
+            resultadoModeracionObj = log.resultado_moderacion;
           }
           
-          if (resultado && resultado.analisisTexto) {
-            const analisis = resultado.analisisTexto;
+          // ✅ EXTRAER INFORMACIÓN ESPECÍFICA DEL ANÁLISIS
+          if (resultadoModeracionObj && resultadoModeracionObj.analisisTexto) {
+            const analisis = resultadoModeracionObj.analisisTexto;
+            
             if (analisis.palabrasOfensivas?.length > 0) {
               detallesEspecificos.push(`${analisis.palabrasOfensivas.length} palabras ofensivas detectadas`);
               detallesEspecificos.push(`Ejemplos: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
             }
-            if (analisis.razon) {
-              detallesEspecificos.push(`Razón: ${analisis.razon}`);
+            
+            // ✅ CORREGIDO: USAR LA RAZÓN DEL ANÁLISIS, NO CONCATENAR
+            if (analisis.razon && !analisis.razon.includes('Contenido aprobado')) {
+              detallesEspecificos.push(analisis.razon);
             }
           }
         } catch (error) {
@@ -350,10 +391,13 @@ async validarTextoPrev(req: Request, res: Response) {
         }
       }
 
+ 
+const mensajeLimpio = limpiarMensajeError(motivoDetallado || 'Contenido no aprobado');
+      
       return res.status(400).json({
         success: false,
         error: 'TEXTO_RECHAZADO',
-        message: 'El texto no cumple con las políticas de contenido',
+        message: mensajeLimpio, // ✅ USAR MENSAJE LIMPIO
         motivo: motivoDetallado,
         detalles: {
           puntuacion: resultadoModeracion.puntuacionGeneral,
@@ -389,6 +433,8 @@ async validarTextoPrev(req: Request, res: Response) {
     });
   }
 },
+
+
 
   /**
    * ✅ NUEVO: Obtener motivos de rechazo específicos desde logs
