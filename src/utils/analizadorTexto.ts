@@ -172,11 +172,11 @@ export class AnalizadorTexto {
       return 'peligroso';
     }
 
-    if (toxicidad > 0.7 || insulto > 0.7 || lenguajeProfano > 0.7) {
+    if (toxicidad > 0.5 || insulto > 0.5 || lenguajeProfano > 0.5) {
       return 'ofensivo';
     }
 
-    if (toxicidad > 0.5) {
+    if (toxicidad > 0.3) {
       return 'sospechoso';
     }
 
