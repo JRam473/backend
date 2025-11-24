@@ -796,31 +796,10 @@ async subirPDFTemporal(req: Request, res: Response) {
       });
     }
 
-    console.log('📊 Detalles del archivo PDF:', {
-      nombre: req.file.filename,
-      tamaño: req.file.size,
-      mimetype: req.file.mimetype,
-      path: req.file.path
-    });
-
     const hashNavegador = generarHashNavegador(req);
     const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
 
-    // ✅ 1. VALIDACIÓN DE ARCHIVO PDF
-    if (req.file.mimetype !== 'application/pdf') {
-      await fsPromises.unlink(req.file.path);
-      return res.status(400).json({
-        success: false,
-        error: 'ARCHIVO_NO_PDF',
-        message: 'El archivo debe ser un PDF válido',
-        detalles: {
-          mimetype_recibido: req.file.mimetype,
-          mimetype_esperado: 'application/pdf'
-        }
-      });
-    }
-
-    // ✅ 2. ANÁLISIS DE CONTENIDO (local primero)
+    // ✅ 1. ANÁLISIS PRIMERO (cuando el archivo temporal todavía existe)
     const pdfAnalysisService = new PdfAnalysisService();
     
     console.log('🔍 Validando PDF básico...');
@@ -832,25 +811,18 @@ async subirPDFTemporal(req: Request, res: Response) {
         success: false,
         error: 'PDF_INVALIDO',
         message: validacionBasica.error || 'PDF no válido',
-        detalles: {
-          problemas: [validacionBasica.error || 'Archivo PDF no válido'],
-          sugerencias: [
-            'Asegúrate de que el archivo sea un PDF válido',
-            'Verifica que el PDF no esté corrupto',
-            'Intenta con otro archivo PDF'
-          ]
-        }
+        detalles: validacionBasica
       });
     }
 
     console.log('✅ PDF válido, analizando contenido...');
     const resultadoAnalisis = await pdfAnalysisService.analizarTextoPDF(
-      req.file.path,
+      req.file.path,  // ✅ Archivo temporal todavía existe
       ipUsuario,
       hashNavegador
     );
 
-    // ✅ 3. SI ES RECHAZADO POR MODERACIÓN
+    // ✅ 2. SI ES RECHAZADO POR MODERACIÓN
     if (!resultadoAnalisis.esAprobado) {
       console.log('❌ PDF rechazado por moderación:', resultadoAnalisis.motivo);
       await fsPromises.unlink(req.file.path);
@@ -861,22 +833,13 @@ async subirPDFTemporal(req: Request, res: Response) {
         message: 'El contenido del PDF no cumple con las políticas de moderación',
         motivo: resultadoAnalisis.motivo,
         tipo: 'pdf_texto',
-        detalles: {
-          puntuacion: resultadoAnalisis.puntuacion,
-          problemas: [resultadoAnalisis.motivo || 'Contenido inapropiado detectado'],
-          sugerencias: [
-            'Revisa que el PDF no contenga lenguaje ofensivo o inapropiado',
-            'Asegúrate de que el contenido sea apropiado para todos los públicos',
-            'Evita contenido promocional, spam o enlaces no permitidos'
-          ],
-          metadata: resultadoAnalisis.metadata
-        }
+        detalles: resultadoAnalisis
       });
     }
 
     console.log('✅ PDF aprobado por moderación, subiendo a Cloudinary...');
 
-    // ✅ 4. SUBIR A CLOUDINARY CON CONFIGURACIÓN ESPECÍFICA
+    // ✅ 3. SOLO SI ES APROBADO, SUBIR A CLOUDINARY
     const fileBuffer = await fsPromises.readFile(req.file.path);
     const cloudinaryResult = await cloudinaryService.subirPDF(
       fileBuffer,
@@ -884,42 +847,26 @@ async subirPDFTemporal(req: Request, res: Response) {
       process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs_lugares'
     );
 
-    // ✅ 5. LIMPIAR ARCHIVO TEMPORAL
+    // ✅ 4. LIMPIAR ARCHIVO TEMPORAL
     await fsPromises.unlink(req.file.path);
 
     console.log('🎉 PDF procesado exitosamente:', {
       url: cloudinaryResult.secure_url,
-      public_id: cloudinaryResult.public_id,
-      tamaño: cloudinaryResult.bytes
+      public_id: cloudinaryResult.public_id
     });
 
-    // ✅ 6. VERIFICACIÓN FINAL DE ACCESO
-    const esAccesible = await cloudinaryService.verificarAccesoPDF(cloudinaryResult.secure_url);
-
-    // ✅ 7. RESPUESTA COMPLETA
     res.json({
       success: true,
       mensaje: 'PDF aprobado y subido exitosamente',
       url_pdf: cloudinaryResult.secure_url,
-      es_accesible: esAccesible,
       detalles_cloudinary: {
         public_id: cloudinaryResult.public_id,
-        folder: cloudinaryResult.folder,
-        resource_type: cloudinaryResult.resource_type,
-        formato: cloudinaryResult.format,
-        bytes: cloudinaryResult.bytes
+        folder: cloudinaryResult.folder
       },
       moderacion: {
         esAprobado: true,
-        puntuacion: resultadoAnalisis.puntuacion,
-        metadata: resultadoAnalisis.metadata
-      },
-      archivo: {
-        nombre: req.file.filename,
-        tamaño: req.file.size,
-        tipo: req.file.mimetype
-      },
-      timestamp: new Date().toISOString()
+        puntuacion: resultadoAnalisis.puntuacion
+      }
     });
 
   } catch (error) {
@@ -929,7 +876,6 @@ async subirPDFTemporal(req: Request, res: Response) {
     if (req.file?.path) {
       try {
         await fsPromises.unlink(req.file.path);
-        console.log('🧹 Archivo temporal limpiado por error');
       } catch (unlinkError) {
         console.error('Error limpiando archivo temporal:', unlinkError);
       }
@@ -937,8 +883,7 @@ async subirPDFTemporal(req: Request, res: Response) {
     
     res.status(500).json({ 
       success: false,
-      error: 'Error interno al procesar PDF',
-      detalle: process.env.NODE_ENV === 'development' ? error instanceof Error ? error.message : String(error) : 'Contacta al administrador'
+      error: 'Error interno al procesar PDF'
     });
   }
 },
