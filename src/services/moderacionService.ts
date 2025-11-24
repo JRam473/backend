@@ -140,7 +140,7 @@ export class ModeracionService {
       }
     }
 
-    return motivos.join('; ') || 'Contenido no aprobado por los filtros automáticos';
+    return motivos.join('; ') || 'Contenido no aprobado por las políticas de la comunidad';
   }
 
   /**
