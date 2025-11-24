@@ -1,17 +1,25 @@
-// controladores/cargaArchivosController.ts - VERSIÓN CORREGIDA
+// controladores/cargaArchivosController.ts - VERSIÓN SOLO CLOUDINARY
 import { Request, Response } from 'express';
 import { pool } from '../utils/baseDeDatos.js';
 import fs from 'fs/promises';
 import { CloudinaryService } from '../services/cloudinaryService.js';
+import { ModeracionImagenService } from '../services/moderacionImagenService.js';
+import { generarHashNavegador } from '../utils/hashNavegador.js';
 
 export const cargaArchivosController = {
-  // Subir foto para lugar (admin only)
+  /**
+   * ✅ CORREGIDO: Subir foto para lugar (SOLO CLOUDINARY)
+   */
   async subirFotoLugar(req: Request, res: Response) {
     const cloudinaryService = new CloudinaryService();
+    const moderacionImagenService = new ModeracionImagenService();
     
     try {
       if (!req.file) {
-        return res.status(400).json({ error: 'No se proporcionó archivo' });
+        return res.status(400).json({ 
+          success: false,
+          error: 'No se proporcionó archivo' 
+        });
       }
 
       const { lugarId, descripcion, esPrincipal } = req.body;
@@ -24,18 +32,50 @@ export const cargaArchivosController = {
       
       if (lugarResult.rows.length === 0) {
         await fs.unlink(req.file.path);
-        return res.status(404).json({ error: 'Lugar no encontrado' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Lugar no encontrado' 
+        });
       }
 
-      // Leer archivo y subir a Cloudinary
+      // ✅ MODERACIÓN DE IMAGEN ANTES DE CLOUDINARY
+      const hashNavegador = generarHashNavegador(req);
+      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+      console.log('🖼️ Moderando imagen antes de subir a Cloudinary...');
+      
       const fileBuffer = await fs.readFile(req.file.path);
+      const resultadoModeracion = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        req.file.filename,
+        ipUsuario,
+        hashNavegador
+      );
+
+      if (!resultadoModeracion.esAprobado) {
+        await fs.unlink(req.file.path);
+        return res.status(400).json({
+          success: false,
+          error: 'IMAGEN_RECHAZADA',
+          message: 'La imagen no cumple con las políticas de contenido',
+          motivo: resultadoModeracion.motivoRechazo,
+          detalles: {
+            puntuacion: resultadoModeracion.puntuacionRiesgo,
+            problemas: [resultadoModeracion.motivoRechazo || 'Contenido inapropiado detectado']
+          }
+        });
+      }
+
+      console.log('✅ Imagen aprobada, subiendo a Cloudinary...');
+
+      // ✅ SUBIR A CLOUDINARY SOLO SI ES APROBADA
       const cloudinaryResult = await cloudinaryService.subirArchivo(
         fileBuffer,
         req.file.filename,
         process.env.CLOUDINARY_LUGARES_FOLDER || 'lugares'
       );
 
-      // Limpiar archivo local
+      // ✅ LIMPIAR ARCHIVO TEMPORAL
       await fs.unlink(req.file.path);
 
       // Obtener el máximo orden actual
@@ -57,33 +97,46 @@ export const cargaArchivosController = {
           descripcion || '',
           esPrincipal === 'true',
           ordenResult.rows[0].siguiente_orden,
-          cloudinaryResult.width,    // ← number | null (compatible)
-          cloudinaryResult.height,   // ← number | null (compatible)
+          cloudinaryResult.width,
+          cloudinaryResult.height,
           cloudinaryResult.bytes,
           req.file.mimetype
         ]
       );
 
       res.status(201).json({
+        success: true,
         mensaje: 'Foto subida exitosamente a Cloudinary',
-        foto: result.rows[0]
+        foto: result.rows[0],
+        moderacion: {
+          esAprobado: true,
+          puntuacionRiesgo: resultadoModeracion.puntuacionRiesgo
+        }
       });
     } catch (error) {
       console.error('Error subiendo foto a Cloudinary:', error);
       if (req.file) {
         await fs.unlink(req.file.path).catch(console.error);
       }
-      res.status(500).json({ error: 'Error al subir foto' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al subir foto' 
+      });
     }
   },
 
-  // Subir PDF para lugar (admin only)
+  /**
+   * ✅ CORREGIDO: Subir PDF para lugar (SOLO CLOUDINARY)
+   */
   async subirPDFLugar(req: Request, res: Response) {
     const cloudinaryService = new CloudinaryService();
     
     try {
       if (!req.file) {
-        return res.status(400).json({ error: 'No se proporcionó archivo PDF' });
+        return res.status(400).json({ 
+          success: false,
+          error: 'No se proporcionó archivo PDF' 
+        });
       }
 
       const { lugarId } = req.body;
@@ -96,18 +149,21 @@ export const cargaArchivosController = {
       
       if (lugarResult.rows.length === 0) {
         await fs.unlink(req.file.path);
-        return res.status(404).json({ error: 'Lugar no encontrado' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Lugar no encontrado' 
+        });
       }
 
-      // Leer archivo y subir a Cloudinary
+      // ✅ SUBIR DIRECTAMENTE A CLOUDINARY SIN ALMACENAMIENTO LOCAL
       const fileBuffer = await fs.readFile(req.file.path);
-      const cloudinaryResult = await cloudinaryService.subirArchivo(
+      const cloudinaryResult = await cloudinaryService.subirPDF(
         fileBuffer,
         req.file.filename,
-        process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs'
+        process.env.CLOUDINARY_PDFS_FOLDER || 'pdfs_lugares'
       );
 
-      // Limpiar archivo local
+      // ✅ LIMPIAR ARCHIVO TEMPORAL INMEDIATAMENTE
       await fs.unlink(req.file.path);
 
       // Si ya existe un PDF en Cloudinary, eliminarlo
@@ -115,7 +171,7 @@ export const cargaArchivosController = {
       if (lugar.pdf_url && cloudinaryService.esUrlCloudinary(lugar.pdf_url)) {
         const publicId = cloudinaryService.extraerPublicId(lugar.pdf_url);
         if (publicId) {
-          await cloudinaryService.eliminarArchivo(publicId).catch(console.error);
+          await cloudinaryService.eliminarPDF(publicId).catch(console.error);
         }
       }
 
@@ -128,19 +184,29 @@ export const cargaArchivosController = {
       );
 
       res.status(201).json({
+        success: true,
         mensaje: 'PDF subido exitosamente a Cloudinary',
-        lugar: result.rows[0]
+        lugar: result.rows[0],
+        cloudinary: {
+          url: cloudinaryResult.secure_url,
+          public_id: cloudinaryResult.public_id
+        }
       });
     } catch (error) {
       console.error('Error subiendo PDF a Cloudinary:', error);
       if (req.file) {
         await fs.unlink(req.file.path).catch(console.error);
       }
-      res.status(500).json({ error: 'Error al subir PDF' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al subir PDF' 
+      });
     }
   },
 
-  // Eliminar PDF de lugar (admin only)
+  /**
+   * ✅ CORREGIDO: Eliminar PDF de lugar (SOLO CLOUDINARY)
+   */
   async eliminarPDFLugar(req: Request, res: Response) {
     const cloudinaryService = new CloudinaryService();
     
@@ -153,16 +219,19 @@ export const cargaArchivosController = {
       );
 
       if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Lugar no encontrado' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Lugar no encontrado' 
+        });
       }
 
       const lugar = result.rows[0];
       
-      // Eliminar archivo de Cloudinary si existe
+      // ✅ ELIMINAR SOLO DE CLOUDINARY SI EXISTE
       if (lugar.pdf_url && cloudinaryService.esUrlCloudinary(lugar.pdf_url)) {
         const publicId = cloudinaryService.extraerPublicId(lugar.pdf_url);
         if (publicId) {
-          await cloudinaryService.eliminarArchivo(publicId);
+          await cloudinaryService.eliminarPDF(publicId);
         }
       }
 
@@ -172,33 +241,73 @@ export const cargaArchivosController = {
         [lugarId]
       );
 
-      res.json({ mensaje: 'PDF eliminado exitosamente de Cloudinary' });
+      res.json({ 
+        success: true,
+        mensaje: 'PDF eliminado exitosamente de Cloudinary' 
+      });
     } catch (error) {
       console.error('Error eliminando PDF de Cloudinary:', error);
-      res.status(500).json({ error: 'Error al eliminar PDF' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al eliminar PDF' 
+      });
     }
   },
 
-  // Subir experiencia (público)
+  /**
+   * ✅ CORREGIDO: Subir experiencia (SOLO CLOUDINARY)
+   */
   async subirExperiencia(req: Request, res: Response) {
     const cloudinaryService = new CloudinaryService();
+    const moderacionImagenService = new ModeracionImagenService();
     
     try {
       if (!req.file) {
-        return res.status(400).json({ error: 'No se proporcionó imagen' });
+        return res.status(400).json({ 
+          success: false,
+          error: 'No se proporcionó imagen' 
+        });
       }
 
       const { descripcion, lugarId } = req.body;
 
-      // Leer archivo y subir a Cloudinary
+      // ✅ MODERACIÓN DE IMAGEN ANTES DE CLOUDINARY
+      const hashNavegador = generarHashNavegador(req);
+      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+      console.log('🖼️ Moderando imagen de experiencia...');
+      
       const fileBuffer = await fs.readFile(req.file.path);
+      const resultadoModeracion = await moderacionImagenService.moderarImagenDesdeBuffer(
+        fileBuffer,
+        req.file.filename,
+        ipUsuario,
+        hashNavegador
+      );
+
+      if (!resultadoModeracion.esAprobado) {
+        await fs.unlink(req.file.path);
+        return res.status(400).json({
+          success: false,
+          error: 'IMAGEN_RECHAZADA',
+          message: 'La imagen no cumple con las políticas de contenido',
+          motivo: resultadoModeracion.motivoRechazo,
+          detalles: {
+            puntuacion: resultadoModeracion.puntuacionRiesgo
+          }
+        });
+      }
+
+      console.log('✅ Imagen de experiencia aprobada, subiendo a Cloudinary...');
+
+      // ✅ SUBIR A CLOUDINARY SOLO SI ES APROBADA
       const cloudinaryResult = await cloudinaryService.subirArchivo(
         fileBuffer,
         req.file.filename,
         process.env.CLOUDINARY_EXPERIENCIAS_FOLDER || 'experiencias'
       );
 
-      // Limpiar archivo local
+      // ✅ LIMPIAR ARCHIVO TEMPORAL
       await fs.unlink(req.file.path);
 
       const result = await pool.query(
@@ -212,27 +321,37 @@ export const cargaArchivosController = {
           descripcion || '',
           cloudinaryResult.public_id,
           lugarId || null,
-          cloudinaryResult.width,    // ← number | null (compatible)
-          cloudinaryResult.height,   // ← number | null (compatible)
+          cloudinaryResult.width,
+          cloudinaryResult.height,
           cloudinaryResult.bytes,
           req.file.mimetype
         ]
       );
 
       res.status(201).json({
+        success: true,
         mensaje: 'Experiencia subida exitosamente a Cloudinary. En proceso de moderación.',
-        experiencia: result.rows[0]
+        experiencia: result.rows[0],
+        moderacion: {
+          esAprobado: true,
+          puntuacionRiesgo: resultadoModeracion.puntuacionRiesgo
+        }
       });
     } catch (error) {
       console.error('Error subiendo experiencia a Cloudinary:', error);
       if (req.file) {
         await fs.unlink(req.file.path).catch(console.error);
       }
-      res.status(500).json({ error: 'Error al subir experiencia' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al subir experiencia' 
+      });
     }
   },
 
-  // Eliminar foto de lugar (admin only)
+  /**
+   * ✅ CORREGIDO: Eliminar foto de lugar (SOLO CLOUDINARY)
+   */
   async eliminarFotoLugar(req: Request, res: Response) {
     const cloudinaryService = new CloudinaryService();
     
@@ -245,25 +364,36 @@ export const cargaArchivosController = {
       );
 
       if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Foto no encontrada' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Foto no encontrada' 
+        });
       }
 
       const foto = result.rows[0];
       
-      // Eliminar archivo de Cloudinary si es una URL de Cloudinary
+      // ✅ ELIMINAR SOLO DE CLOUDINARY
       if (foto.ruta_almacenamiento && cloudinaryService.esUrlCloudinary(foto.url_foto)) {
         const publicId = cloudinaryService.extraerPublicId(foto.url_foto) || foto.ruta_almacenamiento;
         await cloudinaryService.eliminarArchivo(publicId);
       }
 
-      res.json({ mensaje: 'Foto eliminada exitosamente de Cloudinary' });
+      res.json({ 
+        success: true,
+        mensaje: 'Foto eliminada exitosamente de Cloudinary' 
+      });
     } catch (error) {
       console.error('Error eliminando foto de Cloudinary:', error);
-      res.status(500).json({ error: 'Error al eliminar foto' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al eliminar foto' 
+      });
     }
   },
 
-  // Marcar foto como principal (sin cambios)
+  /**
+   * ✅ CORREGIDO: Marcar foto como principal
+   */
   async marcarFotoPrincipal(req: Request, res: Response) {
     try {
       const { fotoId } = req.params;
@@ -274,16 +404,51 @@ export const cargaArchivosController = {
       );
 
       if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Foto no encontrada' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Foto no encontrada' 
+        });
       }
 
       res.json({
+        success: true,
         mensaje: 'Foto marcada como principal',
         foto: result.rows[0]
       });
     } catch (error) {
       console.error('Error marcando foto principal:', error);
-      res.status(500).json({ error: 'Error al marcar foto como principal' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Error al marcar foto como principal' 
+      });
+    }
+  },
+
+  /**
+   * ✅ NUEVO: Verificar estado de Cloudinary
+   */
+  async verificarEstadoCloudinary(req: Request, res: Response) {
+    const cloudinaryService = new CloudinaryService();
+    
+    try {
+      // Intentar una operación simple para verificar la conexión
+      const testUrl = 'https://res.cloudinary.com/demo/image/upload/sample.jpg';
+      const esAccesible = await cloudinaryService.verificarAccesoArchivo(testUrl);
+
+      res.json({
+        success: true,
+        cloudinary: {
+          configurado: true,
+          accesible: esAccesible,
+          timestamp: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      console.error('Error verificando estado de Cloudinary:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Cloudinary no está configurado correctamente'
+      });
     }
   }
 };
