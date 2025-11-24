@@ -1023,52 +1023,62 @@ export class AnalizadorTexto {
   /**
    * ✅ MODIFICADO: FALLBACK MEJORADO CON CONTEXTO
    */
-  private usarFallbackConCoherencia(
-    texto: string, 
-    coherencia: any, 
-    contexto: 'pdf' | 'general'
-  ): AnalisisTexto {
-    console.log(`🔄 Usando análisis local mejorado (fallback - ${contexto})`);
-    
-    const deteccionOfensiva = this.detectarContenidoOfensivoLocal(texto);
-    
-    // ✅ CRITERIOS DIFERENTES SEGÚN CONTEXTO
-    const esAprobado = contexto === 'pdf'
-      ? !deteccionOfensiva.esOfensivo // Solo toxicidad para PDFs
-      : !deteccionOfensiva.esOfensivo && coherencia.tieneSentido; // Ambos para general
+private usarFallbackConCoherencia(
+  texto: string, 
+  coherencia: any, 
+  contexto: 'pdf' | 'general'
+): AnalisisTexto {
+  console.log(`🔄 Usando análisis local mejorado (fallback - ${contexto})`);
+  
+  const deteccionOfensiva = this.detectarContenidoOfensivoLocal(texto);
+  
+  // ✅ CRITERIOS DIFERENTES SEGÚN CONTEXTO
+  const esAprobado = contexto === 'pdf'
+    ? !deteccionOfensiva.esOfensivo // Solo toxicidad para PDFs
+    : !deteccionOfensiva.esOfensivo && coherencia.tieneSentido; // Ambos para general
 
-    const puntuacion = this.calcularPuntuacionCombinada(
-      { TOXICITY: deteccionOfensiva.esOfensivo ? 0.8 : 0.1 },
-      coherencia,
-      contexto
-    );
+  const puntuacion = this.calcularPuntuacionCombinada(
+    { TOXICITY: deteccionOfensiva.esOfensivo ? 0.8 : 0.1 },
+    coherencia,
+    contexto
+  );
 
-    const detalles: DetallesAnalisisMejorado = {
-      metodo: `fallback-local-con-coherencia-${contexto}`,
-      intencion: deteccionOfensiva.intencion,
-      calidadTexto: {
-        tieneSentido: coherencia.tieneSentido,
-        porcentajePalabrasValidas: coherencia.porcentajeValido,
-        razon: coherencia.razon,
-        confianza: coherencia.confianza
-      },
-      longitud: texto.length,
-      tienePatronesSpam: false,
-      contexto: contexto
-    };
-
-    return {
-      esAprobado,
-      puntuacion,
-      palabrasOfensivas: deteccionOfensiva.palabrasOfensivas,
-      razon: esAprobado 
-        ? `Contenido aprobado (análisis local - ${contexto})`
-        : `${deteccionOfensiva.esOfensivo ? deteccionOfensiva.razon + '; ' : ''}${
-            contexto === 'general' ? coherencia.razon : 'Contenido PDF rechazado por toxicidad'
-          }`,
-      detalles: detalles as AnalisisTexto['detalles']
-    };
+  // ✅ CORREGIDO: Generar razón de manera consistente
+  let razon: string;
+  if (!esAprobado) {
+    if (deteccionOfensiva.esOfensivo) {
+      razon = deteccionOfensiva.razon;
+    } else if (contexto === 'general' && !coherencia.tieneSentido) {
+      razon = coherencia.razon;
+    } else {
+      razon = 'Contenido no aprobado';
+    }
+  } else {
+    razon = `Contenido aprobado (${contexto})`;
   }
+
+  const detalles: DetallesAnalisisMejorado = {
+    metodo: `fallback-local-con-coherencia-${contexto}`,
+    intencion: deteccionOfensiva.intencion,
+    calidadTexto: {
+      tieneSentido: coherencia.tieneSentido,
+      porcentajePalabrasValidas: coherencia.porcentajeValido,
+      razon: coherencia.razon,
+      confianza: coherencia.confianza
+    },
+    longitud: texto.length,
+    tienePatronesSpam: false,
+    contexto: contexto
+  };
+
+  return {
+    esAprobado,
+    puntuacion,
+    palabrasOfensivas: deteccionOfensiva.palabrasOfensivas,
+    razon, // ✅ Usar la razón generada consistentemente
+    detalles: detalles as AnalisisTexto['detalles']
+  };
+}
 
   // Métodos de compatibilidad
   limpiarTexto(texto: string): string {
