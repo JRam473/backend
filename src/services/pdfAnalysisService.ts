@@ -625,87 +625,54 @@ export class PdfAnalysisService {
     }
   }
 
- /**
- * ✅ LÓGICA PRINCIPAL MEJORADA - VERSIÓN MÁS SEGURA
- */
-async analizarTextoPDF(
-  rutaArchivo: string, 
-  ipUsuario: string, 
-  hashNavegador: string
-): Promise<ResultadoAnalisisPDF> {
-  try {
-    console.log('🧠 Iniciando análisis SEGURO de PDF...');
+  /**
+   * ✅ LÓGICA PRINCIPAL MEJORADA CON ESTRATEGIA PERMISIVA
+   */
+  async analizarTextoPDF(
+    rutaArchivo: string, 
+    ipUsuario: string, 
+    hashNavegador: string
+  ): Promise<ResultadoAnalisisPDF> {
+    try {
+      console.log('🧠 Iniciando análisis permisivo de PDF...');
 
-    const datosPDF = await this.analizarEstructuraPDF(rutaArchivo);
-    const decision = this.determinarEstrategia(datosPDF);
-    
-    console.log('🎯 Estrategia seleccionada:', {
-      estrategia: decision.estrategia,
-      razon: decision.razon,
-      tipoContenido: datosPDF.tipoContenido,
-      confianzaTexto: datosPDF.confianzaTexto,
-      tieneImagenes: datosPDF.tieneImagenes,
-      esEscaneado: datosPDF.esEscaneado,
-      esPermisivo: decision.esPermisivo
-    });
-
-    // ✅ NUEVO: DETECCIÓN DE FALLOS EN CONVERSIÓN
-    let conversionFallida = false;
-    let analisisImagenes: AnalisisImagenes = {
-      esAprobado: true,
-      motivo: 'No se necesitó análisis de imágenes',
-      riesgoImagenes: 0.1,
-      problemasDetectados: [],
-      ahorroCreditos: '100%',
-      imagenesRechazadas: 0,
-      imagenesProcesadas: 0,
-      textoExtraidoDeImagenes: '',
-      tipoPDF: 'digital',
-      confianzaOCR: 0
-    };
-
-    let textoParaAnalizar = datosPDF.texto;
-    let esAprobado = true;
-    let motivo = '';
-    let puntuacion = 0.9;
-    let recomendacion = 'PDF listo para uso';
-
-    // ✅ NUEVO: VERIFICAR SI SE NECESITAN HERRAMIENTAS EXTERNAS
-    if (decision.necesitaImagenes) {
-      console.log('🔧 Verificando herramientas de conversión PDF...');
-      const herramientasDisponibles = await this.verificarHerramientasConversion();
+      const datosPDF = await this.analizarEstructuraPDF(rutaArchivo);
+      const decision = this.determinarEstrategia(datosPDF);
       
-      if (!herramientasDisponibles) {
-        console.warn('⚠️ Herramientas de conversión no disponibles - análisis limitado');
-        conversionFallida = true;
-        
-        // ✅ ESTRATEGIA MÁS SEGURA: RECHAZAR PDFs CON IMÁGENES SI NO HAY HERRAMIENTAS
-        if (datosPDF.tieneImagenes) {
-          return {
-            esAprobado: false,
-            motivo: 'No se pueden analizar las imágenes del PDF. Herramientas de conversión no disponibles.',
-            puntuacion: 0.8,
-            metadata: {
-              numPaginas: datosPDF.numPaginas,
-              tipoContenido: datosPDF.tipoContenido,
-              tieneImagenes: datosPDF.tieneImagenes,
-              herramientasDisponibles: false,
-              conversionFallida: true
-            },
-            estrategiaUsada: 'rechazado_por_seguridad',
-            tipoContenido: datosPDF.tipoContenido,
-            recomendacion: 'El PDF contiene imágenes que no se pueden analizar. Use un PDF con solo texto o contacte al administrador.'
-          };
-        }
-      }
-    }
+      console.log('🎯 Estrategia seleccionada:', {
+        estrategia: decision.estrategia,
+        razon: decision.razon,
+        tipoContenido: datosPDF.tipoContenido,
+        confianzaTexto: datosPDF.confianzaTexto,
+        tieneImagenes: datosPDF.tieneImagenes,
+        esEscaneado: datosPDF.esEscaneado,
+        esPermisivo: decision.esPermisivo
+      });
 
-    switch (decision.estrategia) {
-      case 'pdf_escaneado_permisivo':
-      case 'pdf_academico':
-        console.log('📚 EJECUTANDO: Análisis para PDF escaneado/académico');
-        
-        try {
+      let analisisImagenes: AnalisisImagenes = {
+        esAprobado: true,
+        motivo: 'No se necesitó análisis de imágenes',
+        riesgoImagenes: 0.1,
+        problemasDetectados: [],
+        ahorroCreditos: '100%',
+        imagenesRechazadas: 0,
+        imagenesProcesadas: 0,
+        textoExtraidoDeImagenes: '',
+        tipoPDF: 'digital',
+        confianzaOCR: 0
+      };
+
+      let textoParaAnalizar = datosPDF.texto;
+      let esAprobado = true;
+      let motivo = '';
+      let puntuacion = 0.9;
+      let recomendacion = 'PDF listo para uso';
+
+      switch (decision.estrategia) {
+        case 'pdf_escaneado_permisivo':
+        case 'pdf_academico':
+          console.log('📚 EJECUTANDO: Análisis permisivo para PDF escaneado/académico');
+          
           analisisImagenes = await this.analizarImagenesConTexto(
             rutaArchivo, 
             ipUsuario, 
@@ -732,39 +699,20 @@ async analizarTextoPDF(
             `Problemas en ${!resultadoPermisivo.esAprobado ? 'texto' : 'imágenes'}`;
           
           recomendacion = 'Documento académico/escaneado - verificar calidad de OCR si es necesario';
-        } catch (error) {
-          console.error('❌ Error en análisis de imágenes:', error);
-          // ✅ MÁS SEGURO: RECHAZAR SI FALLA EL ANÁLISIS DE IMÁGENES
-          return {
-            esAprobado: false,
-            motivo: 'Error al analizar imágenes del PDF. No se puede garantizar la seguridad del contenido.',
-            puntuacion: 0.9,
-            metadata: {
-              error: error instanceof Error ? error.message : 'Error desconocido',
-              conversionFallida: true,
-              estrategia: decision.estrategia
-            },
-            estrategiaUsada: 'error_analisis_imagenes',
-            tipoContenido: datosPDF.tipoContenido,
-            recomendacion: 'El PDF no pudo ser analizado correctamente. Intente con otro archivo.'
-          };
-        }
-        break;
+          break;
 
-      case 'solo_texto_local':
-        console.log('💰 EJECUTANDO: Solo análisis de texto local');
-        textoParaAnalizar = this.limitarTexto(datosPDF.texto, 10000);
-        const resultadoTexto = await this.analizarTextoPermisivo(textoParaAnalizar, 'texto_local');
-        
-        esAprobado = resultadoTexto.esAprobado;
-        puntuacion = resultadoTexto.puntuacion;
-        motivo = resultadoTexto.razon;
-        break;
+        case 'solo_texto_local':
+          console.log('💰 EJECUTANDO: Solo análisis de texto local');
+          textoParaAnalizar = this.limitarTexto(datosPDF.texto, 10000);
+          const resultadoTexto = await this.analizarTextoPermisivo(textoParaAnalizar, 'texto_local');
+          
+          esAprobado = resultadoTexto.esAprobado;
+          puntuacion = resultadoTexto.puntuacion;
+          motivo = resultadoTexto.razon;
+          break;
 
-      case 'texto_con_imagenes_aprobadas':
-        console.log('🔄 EJECUTANDO: Texto local + imágenes con moderación');
-        
-        try {
+        case 'texto_con_imagenes_aprobadas':
+          console.log('🔄 EJECUTANDO: Texto local + imágenes con moderación');
           textoParaAnalizar = this.limitarTexto(datosPDF.texto, 5000);
           analisisImagenes = await this.analizarImagenesConTexto(
             rutaArchivo, 
@@ -788,28 +736,10 @@ async analizarTextoPDF(
           motivo = esAprobado ? 
             'PDF aprobado (contenido mixto)' : 
             `Problemas en ${!resultadoCombinado.esAprobado ? 'texto' : 'imágenes'}`;
-        } catch (error) {
-          console.error('❌ Error en análisis combinado:', error);
-          // ✅ RECHAZAR SI FALLA EL ANÁLISIS DE IMÁGENES
-          return {
-            esAprobado: false,
-            motivo: 'Error al analizar contenido mixto del PDF.',
-            puntuacion: 0.8,
-            metadata: {
-              error: error instanceof Error ? error.message : 'Error desconocido',
-              conversionFallida: true
-            },
-            estrategiaUsada: 'error_analisis_mixto',
-            tipoContenido: datosPDF.tipoContenido,
-            recomendacion: 'El PDF no pudo ser analizado completamente.'
-          };
-        }
-        break;
+          break;
 
-      case 'imagenes_con_vision_para_texto':
-        console.log('🔍 EJECUTANDO: Imágenes con Google Vision para texto');
-        
-        try {
+        case 'imagenes_con_vision_para_texto':
+          console.log('🔍 EJECUTANDO: Imágenes con Google Vision para texto');
           analisisImagenes = await this.analizarImagenesConTexto(
             rutaArchivo, 
             ipUsuario, 
@@ -835,27 +765,10 @@ async analizarTextoPDF(
             motivo = analisisImagenes.motivo;
           }
           recomendacion = 'Documento escaneado - calidad de texto variable';
-        } catch (error) {
-          console.error('❌ Error en análisis con Vision:', error);
-          return {
-            esAprobado: false,
-            motivo: 'Error al analizar PDF escaneado con Google Vision.',
-            puntuacion: 0.8,
-            metadata: {
-              error: error instanceof Error ? error.message : 'Error desconocido',
-              conversionFallida: true
-            },
-            estrategiaUsada: 'error_vision',
-            tipoContenido: datosPDF.tipoContenido,
-            recomendacion: 'El PDF escaneado no pudo ser procesado.'
-          };
-        }
-        break;
+          break;
 
-      case 'solo_moderacion_imagenes':
-        console.log('🛡️ EJECUTANDO: Solo moderación de imágenes');
-        
-        try {
+        case 'solo_moderacion_imagenes':
+          console.log('🛡️ EJECUTANDO: Solo moderación de imágenes');
           analisisImagenes = await this.analizarImagenesConTexto(
             rutaArchivo, 
             ipUsuario, 
@@ -866,63 +779,38 @@ async analizarTextoPDF(
           esAprobado = analisisImagenes.esAprobado;
           puntuacion = analisisImagenes.riesgoImagenes;
           motivo = analisisImagenes.motivo;
-        } catch (error) {
-          console.error('❌ Error en moderación de imágenes:', error);
-          return {
-            esAprobado: false,
-            motivo: 'Error al moderar imágenes del PDF.',
-            puntuacion: 0.9,
-            metadata: {
-              error: error instanceof Error ? error.message : 'Error desconocido',
-              conversionFallida: true
-            },
-            estrategiaUsada: 'error_moderacion_imagenes',
-            tipoContenido: datosPDF.tipoContenido,
-            recomendacion: 'No se pudieron analizar las imágenes del PDF.'
-          };
-        }
-        break;
+          break;
 
-      default:
-        console.log('🔄 EJECUTANDO: Fallback básico');
-        // ✅ MÁS SEGURO: NO USAR MODO PERMISIVO EN FALLBACK
-        if (datosPDF.tieneImagenes) {
-          return {
-            esAprobado: false,
-            motivo: 'PDF con imágenes no puede ser analizado completamente. Herramientas de conversión no disponibles.',
-            puntuacion: 0.7,
-            metadata: {
-              tipoContenido: datosPDF.tipoContenido,
-              tieneImagenes: datosPDF.tieneImagenes,
-              herramientasDisponibles: false,
-              conversionFallida: true
-            },
-            estrategiaUsada: 'rechazado_por_seguridad',
-            tipoContenido: datosPDF.tipoContenido,
-            recomendacion: 'Use un PDF con solo texto o contacte al administrador para configurar las herramientas de análisis.'
-          };
-        } else {
-          // Solo para PDFs de solo texto
-          analisisImagenes = await this.analisisBasicoPDF(rutaArchivo, false);
+        default:
+          console.log('🔄 EJECUTANDO: Fallback básico permisivo');
+          analisisImagenes = await this.analisisBasicoPDF(rutaArchivo, true);
           esAprobado = analisisImagenes.esAprobado;
           puntuacion = analisisImagenes.riesgoImagenes;
           motivo = analisisImagenes.motivo;
-        }
-        break;
-    }
+          break;
+      }
 
-    // ✅ ANÁLISIS FINAL MÁS SEGURO - ELIMINAR PERMISIVIDAD
-    if (!esAprobado) {
-      console.log('❌ PDF rechazado por análisis de seguridad');
+      // ✅ ANÁLISIS FINAL MÁS PERMISIVO
+      if (!esAprobado && decision.esPermisivo) {
+        // Reconsiderar rechazos en modo permisivo
+        if (puntuacion > 0.3 && !motivo.includes('tóxico') && !motivo.includes('extremo')) {
+          esAprobado = true;
+          motivo = `Reconsiderado y aprobado (modo permisivo): ${motivo}`;
+          puntuacion = Math.min(0.8, puntuacion + 0.2);
+          recomendacion = 'Aprobado tras reconsideración - verificar manualmente si es necesario';
+        }
+      }
+
       return {
-        esAprobado: false,
-        motivo: motivo,
-        puntuacion: puntuacion,
+        esAprobado,
+        motivo,
+        puntuacion,
         detalles: {
           texto: textoParaAnalizar ? this.limitarTexto(textoParaAnalizar, 1000) : null,
           imagenes: analisisImagenes,
           estrategia: decision.estrategia,
-          conversionFallida: conversionFallida
+          decision: decision.razon,
+          esPermisivo: decision.esPermisivo
         },
         metadata: {
           numPaginas: datosPDF.numPaginas,
@@ -930,127 +818,87 @@ async analizarTextoPDF(
           confianzaTexto: datosPDF.confianzaTexto,
           tieneImagenes: datosPDF.tieneImagenes,
           esEscaneado: datosPDF.esEscaneado,
-          conversionFallida: conversionFallida,
-          herramientasDisponibles: !conversionFallida
+          calidadOCR: datosPDF.calidadOCR,
+          tipoPDF: analisisImagenes.tipoPDF,
+          textoOriginalLength: datosPDF.texto.length,
+          textoAnalizadoLength: textoParaAnalizar.length,
+          usoGoogleVision: decision.necesitaGoogleVision,
+          ahorroCreditos: analisisImagenes.ahorroCreditos,
+          imagenesRechazadas: analisisImagenes.imagenesRechazadas,
+          imagenesProcesadas: analisisImagenes.imagenesProcesadas,
+          confianzaOCR: analisisImagenes.confianzaOCR
         },
         estrategiaUsada: decision.estrategia,
         tipoContenido: datosPDF.tipoContenido,
-        recomendacion: 'El contenido no cumple con las políticas de seguridad.'
+        recomendacion
       };
-    }
 
-    return {
-      esAprobado,
-      motivo,
-      puntuacion,
-      detalles: {
-        texto: textoParaAnalizar ? this.limitarTexto(textoParaAnalizar, 1000) : null,
-        imagenes: analisisImagenes,
-        estrategia: decision.estrategia,
-        conversionFallida: conversionFallida
-      },
-      metadata: {
-        numPaginas: datosPDF.numPaginas,
-        tipoContenido: datosPDF.tipoContenido,
-        confianzaTexto: datosPDF.confianzaTexto,
-        tieneImagenes: datosPDF.tieneImagenes,
-        esEscaneado: datosPDF.esEscaneado,
-        conversionFallida: conversionFallida,
-        herramientasDisponibles: !conversionFallida
-      },
-      estrategiaUsada: decision.estrategia,
-      tipoContenido: datosPDF.tipoContenido,
-      recomendacion
-    };
-
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-    console.error('❌ Error en análisis de PDF:', errorMessage);
-    
-    // ✅ MÁS SEGURO: RECHAZAR EN CASO DE ERROR
-    return {
-      esAprobado: false,
-      motivo: 'Error en análisis - no se puede garantizar la seguridad del PDF',
-      puntuacion: 1.0,
-      metadata: {
-        error: errorMessage,
-        estrategia: 'error_critico'
-      },
-      estrategiaUsada: 'error_critico',
-      tipoContenido: 'desconocido',
-      recomendacion: 'Error crítico en análisis. Contacte al administrador.'
-    };
-  }
-}
-
-/**
- * ✅ NUEVO: VERIFICAR HERRAMIENTAS DE CONVERSIÓN DISPONIBLES
- */
-private async verificarHerramientasConversion(): Promise<boolean> {
-  try {
-    const { exec } = await import('child_process');
-    const { promisify } = await import('util');
-    const execAsync = promisify(exec);
-
-    const herramientas = [
-      { comando: 'convert -version', nombre: 'ImageMagick' },
-      { comando: 'gs --version', nombre: 'Ghostscript' },
-      { comando: 'pdftoppm -v', nombre: 'Poppler' }
-    ];
-
-    let herramientasDisponibles = 0;
-
-    for (const herramienta of herramientas) {
-      try {
-        await execAsync(herramienta.comando);
-        console.log(`✅ ${herramienta.nombre} disponible`);
-        herramientasDisponibles++;
-      } catch {
-        console.log(`❌ ${herramienta.nombre} no disponible`);
-      }
-    }
-
-    console.log(`📊 Herramientas disponibles: ${herramientasDisponibles}/${herramientas.length}`);
-    
-    // Requerir al menos 1 herramienta para análisis de imágenes
-    return herramientasDisponibles > 0;
-    
-  } catch (error) {
-    console.error('❌ Error verificando herramientas:', error);
-    return false;
-  }
-}
-/**
- * ✅ ANÁLISIS BÁSICO MEJORADO - VERSIÓN MÁS SEGURA
- */
-private async analisisBasicoPDF(rutaArchivo: string, esPermisivo: boolean = false): Promise<AnalisisImagenes> {
-  try {
-    console.log('🔍 Usando análisis básico (modo seguro)...');
-    
-    const dataBuffer = fs.readFileSync(rutaArchivo);
-    const data = await pdfParse(dataBuffer);
-    const tieneTexto = data.text && data.text.trim().length > 10; // ✅ Mínimo 10 caracteres
-    
-    if (tieneTexto) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.error('❌ Error en análisis permisivo:', errorMessage);
+      
+      // ✅ EN CASO DE ERROR, SER MÁS PERMISIVO
       return {
         esAprobado: true,
-        motivo: 'PDF con texto legible - Análisis básico',
-        riesgoImagenes: 0.3, // ✅ Riesgo más alto por análisis limitado
-        problemasDetectados: ['Análisis limitado - solo texto verificado'],
-        ahorroCreditos: '100%',
-        imagenesRechazadas: 0,
-        imagenesProcesadas: 0,
-        textoExtraidoDeImagenes: '',
-        tipoPDF: 'digital',
-        confianzaOCR: 0.5
+        motivo: 'Error en análisis - aprobado por defecto (modo permisivo)',
+        puntuacion: 0.7,
+        metadata: {
+          error: errorMessage,
+          estrategia: 'fallback_error_permisivo'
+        },
+        estrategiaUsada: 'error_permisivo',
+        tipoContenido: 'desconocido',
+        recomendacion: 'Verificar manualmente debido a error en análisis automático'
       };
-    } else {
-      // ✅ MÁS SEGURO: RECHAZAR PDFs SIN TEXTO
+    }
+  }
+
+  /**
+   * ✅ ANÁLISIS BÁSICO MEJORADO (FALLBACK PERMISIVO)
+   */
+  private async analisisBasicoPDF(rutaArchivo: string, esPermisivo: boolean = true): Promise<AnalisisImagenes> {
+    try {
+      console.log('🔍 Usando análisis básico (fallback permisivo)...');
+      
+      const dataBuffer = fs.readFileSync(rutaArchivo);
+      const data = await pdfParse(dataBuffer);
+      const tieneTexto = data.text && data.text.trim().length > 0;
+      
+      if (tieneTexto) {
+        return {
+          esAprobado: true,
+          motivo: 'PDF con texto legible - Análisis básico permisivo',
+          riesgoImagenes: 0.1,
+          problemasDetectados: [],
+          ahorroCreditos: '100%',
+          imagenesRechazadas: 0,
+          imagenesProcesadas: 0,
+          textoExtraidoDeImagenes: '',
+          tipoPDF: 'digital',
+          confianzaOCR: 0.8
+        };
+      } else {
+        return {
+          esAprobado: esPermisivo, // En modo permisivo, aprobar incluso sin texto
+          motivo: esPermisivo 
+            ? 'PDF sin texto - Aprobado en modo permisivo' 
+            : 'PDF sin texto - Análisis limitado disponible',
+          riesgoImagenes: esPermisivo ? 0.3 : 0.5,
+          problemasDetectados: [],
+          ahorroCreditos: '100%',
+          imagenesRechazadas: 0,
+          imagenesProcesadas: 0,
+          textoExtraidoDeImagenes: '',
+          tipoPDF: 'desconocido',
+          confianzaOCR: 0
+        };
+      }
+    } catch (error) {
       return {
-        esAprobado: false,
-        motivo: 'PDF sin texto legible - No se puede analizar contenido',
-        riesgoImagenes: 0.8,
-        problemasDetectados: ['Sin texto legible', 'No se pueden analizar imágenes'],
+        esAprobado: true, // Siempre aprobar en caso de error en modo permisivo
+        motivo: 'Análisis básico falló - Aprobado por defecto (modo permisivo)',
+        riesgoImagenes: 0.2,
+        problemasDetectados: [],
         ahorroCreditos: '100%',
         imagenesRechazadas: 0,
         imagenesProcesadas: 0,
@@ -1059,22 +907,7 @@ private async analisisBasicoPDF(rutaArchivo: string, esPermisivo: boolean = fals
         confianzaOCR: 0
       };
     }
-  } catch (error) {
-    // ✅ MÁS SEGURO: RECHAZAR EN CASO DE ERROR
-    return {
-      esAprobado: false,
-      motivo: 'Análisis básico falló - No se puede garantizar seguridad',
-      riesgoImagenes: 0.9,
-      problemasDetectados: ['Error en análisis', 'Contenido no verificable'],
-      ahorroCreditos: '100%',
-      imagenesRechazadas: 0,
-      imagenesProcesadas: 0,
-      textoExtraidoDeImagenes: '',
-      tipoPDF: 'desconocido',
-      confianzaOCR: 0
-    };
   }
-}
 
   // ... (MÉTODOS RESTANTES SIMPLIFICADOS POR ESPACIO)
 
