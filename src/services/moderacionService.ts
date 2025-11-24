@@ -1,4 +1,4 @@
-// backend/src/services/moderacionService.ts - VERSIÓN COMPLETAMENTE CORREGIDA
+// backend/src/services/moderacionService.ts - VERSIÓN COMPATIBLE CON TIPOS
 import { AnalizadorTexto } from '../utils/analizadorTexto.js';
 import { pool } from '../utils/baseDeDatos.js';
 import { ResultadoModeracion, AnalisisTexto } from '../types/moderacion.js';
@@ -130,7 +130,7 @@ export class ModeracionService {
       }
       
       // ✅ CORREGIDO: Verificar coherencia usando el análisis de calidad
-      if (!texto.detalles?.calidadTexto?.tieneSentido) {
+      if (texto.detalles?.calidadTexto && !texto.detalles.calidadTexto.tieneSentido) {
         motivos.push('Texto poco coherente o muy corto');
       }
       
@@ -162,7 +162,7 @@ export class ModeracionService {
       if (analisisTexto.detalles?.tienePatronesSpam) {
         problemas.push('urls');
       }
-      if (!analisisTexto.detalles?.calidadTexto?.tieneSentido) {
+      if (analisisTexto.detalles?.calidadTexto && !analisisTexto.detalles.calidadTexto.tieneSentido) {
         problemas.push('incoherente');
       }
       if (palabrasOfensivas.length > 0) {
@@ -327,7 +327,7 @@ export class ModeracionService {
       return 'informacion_contacto';
     }
 
-    if (!analisisTexto.detalles?.calidadTexto?.tieneSentido) {
+    if (analisisTexto.detalles?.calidadTexto && !analisisTexto.detalles.calidadTexto.tieneSentido) {
       return 'texto_incoherente';
     }
 
