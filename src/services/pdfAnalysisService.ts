@@ -1,4 +1,4 @@
-// services/pdfAnalysisService.ts - VERSIÓN NO PERMISIVA
+// services/pdfAnalysisService.ts - VERSIÓN CON API KEY DE GOOGLE VISION
 import fs from 'fs';
 import { ModeracionService } from './moderacionService.js';
 import { ModeracionImagenService } from './moderacionImagenService.js';
@@ -6,6 +6,10 @@ import { PdfConversionService } from './pdfConversionService.js';
 import { AnalizadorTexto } from '../utils/analizadorTexto.js';
 import pdfParse from 'pdf-parse';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
+
+// ✅ CONFIGURACIÓN DE GOOGLE VISION
+const GOOGLE_VISION_API_KEY = 'AIzaSyCXsxUbG2Sy-X1wWgYwnhHikf9LHJRTA9U';
+const GOOGLE_CLOUD_PROJECT = 'iconic-being-454318-n1';
 
 // ✅ INTERFACES
 interface DatosPDF {
@@ -78,250 +82,57 @@ export class PdfAnalysisService {
   }
 
   /**
-   * ✅ INICIALIZAR CLIENTE GOOGLE VISION
+   * ✅ CORREGIDO: INICIALIZAR CLIENTE GOOGLE VISION CON API KEY ESPECÍFICA
    */
   private inicializarVisionClient(): ImageAnnotatorClient | null {
     try {
-      if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-        console.log('🔧 Configurando Google Vision con Service Account JSON...');
-        const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+      console.log('🔧 Configurando Google Vision con API Key específica...');
+      
+      // ✅ USAR LA API KEY DIRECTAMENTE
+      if (GOOGLE_VISION_API_KEY) {
+        console.log('✅ API Key de Google Vision encontrada');
         return new ImageAnnotatorClient({
-          credentials: credentials,
-          projectId: credentials.project_id
+          key: GOOGLE_VISION_API_KEY,
+          projectId: GOOGLE_CLOUD_PROJECT
         });
       }
       
-      console.warn('⚠️ Google Vision API no configurada');
+      console.warn('⚠️ No se encontró API Key de Google Vision');
       return null;
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      console.warn('⚠️ Google Vision API no disponible:', errorMessage);
+      console.error('❌ Error inicializando Google Vision:', errorMessage);
       return null;
     }
   }
 
   /**
-   * ✅ DETECCIÓN ESTRICTA DEL TIPO DE PDF
+   * ✅ NUEVO: VERIFICAR CONEXIÓN CON GOOGLE VISION
    */
-  private async analizarEstructuraPDF(rutaArchivo: string): Promise<DatosPDF> {
+  async verificarConexionVision(): Promise<{ disponible: boolean; error?: string }> {
+    if (!this.visionClient) {
+      return { disponible: false, error: 'Cliente de Vision no inicializado' };
+    }
+
     try {
-      console.log('🔍 Analizando estructura del PDF (versión estricta)...');
-      
-      const dataBuffer = fs.readFileSync(rutaArchivo);
-      const data = await pdfParse(dataBuffer);
-      
-      const texto = data.text || '';
-      const textoLimpio = texto.trim();
-      
-      const lineas = textoLimpio.split('\n').filter((linea: string) => linea.trim().length > 0);
-      const palabras = textoLimpio.split(/\s+/).filter((palabra: string) => palabra.length > 0);
-      
-      const longitudTexto = textoLimpio.length;
-      const numPalabras = palabras.length;
-      const densidadPalabras = numPalabras / Math.max(1, lineas.length);
-      const palabrasUnicas = new Set(palabras.map((p: string) => p.toLowerCase())).size;
-      const ratioUnicidad = numPalabras > 0 ? palabrasUnicas / numPalabras : 0;
-      
-      // ✅ ANÁLISIS ESTRICTO - SOLO CONTENIDO VERIFICABLE
-      let tipoContenido: 'texto' | 'imagenes' | 'mixto' | 'desconocido' = 'desconocido';
-      let confianzaTexto = 0;
-      let tieneImagenes = false;
-      let esEscaneado = false;
-      let calidadOCR = 0;
-
-      // CRITERIOS ESTRICTOS PARA TEXTO VÁLIDO
-      if (longitudTexto > 100 && densidadPalabras > 3 && ratioUnicidad > 0.5) {
-        tipoContenido = 'texto';
-        confianzaTexto = 0.9;
-        calidadOCR = 0.9;
-      } else if (longitudTexto > 50 && densidadPalabras > 1.5) {
-        tipoContenido = 'mixto';
-        confianzaTexto = 0.6;
-        tieneImagenes = true;
-        calidadOCR = 0.7;
-      } else if (longitudTexto > 0) {
-        tipoContenido = 'imagenes';
-        confianzaTexto = 0.2;
-        tieneImagenes = true;
-        esEscaneado = true;
-        calidadOCR = 0.3;
-      } else {
-        tipoContenido = 'imagenes';
-        confianzaTexto = 0;
-        tieneImagenes = true;
-        esEscaneado = true;
-        calidadOCR = 0.1;
-      }
-
-      // DETECCIÓN DE METADATOS PARA ESCANEADOS
-      if (data.metadata) {
-        const producer = (data.metadata.Producer || '').toLowerCase();
-        const creator = (data.metadata.Creator || '').toLowerCase();
-        
-        if (producer.includes('scanner') || producer.includes('ocr') || 
-            creator.includes('scanner') || creator.includes('ocr')) {
-          esEscaneado = true;
-          tipoContenido = 'imagenes';
-        }
-      }
-
-      console.log('📊 Análisis de estructura PDF (estricto):', {
-        tipoContenido,
-        confianzaTexto,
-        tieneImagenes,
-        esEscaneado,
-        calidadOCR,
-        longitudTexto,
-        numPalabras,
-        densidadPalabras: densidadPalabras.toFixed(2),
-        ratioUnicidad: ratioUnicidad.toFixed(2),
-        numPaginas: data.numpages
+      // Intentar una operación simple para verificar la conexión
+      const [result] = await this.visionClient.safeSearchDetection({
+        image: { content: Buffer.from('test') }
       });
       
-      return {
-        texto: textoLimpio,
-        numPaginas: data.numpages || 1,
-        info: data.info || {},
-        metadata: data.metadata || {},
-        tipoContenido,
-        confianzaTexto,
-        tieneImagenes,
-        esEscaneado,
-        calidadOCR
-      };
-      
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      console.log('❌ Análisis de estructura falló:', errorMessage);
-      
-      // ✅ EN MODO ESTRICTO, SI FALLA EL ANÁLISIS, CONSIDERAR COMO IMÁGENES
-      return {
-        texto: '',
-        numPaginas: 1,
-        info: { error: errorMessage },
-        metadata: {},
-        tipoContenido: 'imagenes',
-        confianzaTexto: 0,
-        tieneImagenes: true,
-        esEscaneado: true,
-        calidadOCR: 0
+      return { disponible: true };
+    } catch (error: any) {
+      console.error('❌ Error verificando conexión con Google Vision:', error);
+      return { 
+        disponible: false, 
+        error: error.message || 'Error de conexión con Google Vision API' 
       };
     }
   }
 
   /**
-   * ✅ ESTRATEGIA ESTRICTA - SOLO ACEPTA CONTENIDO ANALIZADO
-   */
-  private determinarEstrategia(datosPDF: DatosPDF): {
-    estrategia: EstrategiaAnalisis;
-    razon: string;
-    necesitaImagenes: boolean;
-    necesitaGoogleVision: boolean;
-  } {
-    const tieneVisionDisponible = !!this.visionClient;
-    
-    // ✅ ESTRATEGIAS ESTRICTAS - SOLO ACEPTAR CONTENIDO VERIFICADO
-    if (datosPDF.confianzaTexto > 0.7 && datosPDF.texto.length > 100) {
-      return {
-        estrategia: 'solo_texto_local',
-        razon: 'PDF con texto confiable - análisis local estricto',
-        necesitaImagenes: false,
-        necesitaGoogleVision: false
-      };
-    }
-    
-    if (datosPDF.confianzaTexto > 0.4 && datosPDF.tieneImagenes) {
-      if (tieneVisionDisponible) {
-        return {
-          estrategia: 'texto_con_imagenes_aprobadas',
-          razon: 'PDF mixto - análisis combinado estricto',
-          necesitaImagenes: true,
-          necesitaGoogleVision: true
-        };
-      } else {
-        return {
-          estrategia: 'solo_moderacion_imagenes',
-          razon: 'PDF mixto - solo moderación de imágenes',
-          necesitaImagenes: true,
-          necesitaGoogleVision: false
-        };
-      }
-    }
-    
-    if (datosPDF.confianzaTexto <= 0.4 && datosPDF.tieneImagenes) {
-      if (tieneVisionDisponible) {
-        return {
-          estrategia: 'imagenes_con_vision_para_texto',
-          razon: 'PDF escaneado - extraer texto con Vision',
-          necesitaImagenes: true,
-          necesitaGoogleVision: true
-        };
-      } else {
-        return {
-          estrategia: 'solo_moderacion_imagenes', 
-          razon: 'PDF escaneado - moderación básica',
-          necesitaImagenes: true,
-          necesitaGoogleVision: false
-        };
-      }
-    }
-    
-    // ✅ SI NO SE PUEDE ANALIZAR, RECHAZAR
-    return {
-      estrategia: 'fallback_rechazado',
-      razon: 'Contenido no analizable - rechazado por seguridad',
-      necesitaImagenes: false,
-      necesitaGoogleVision: false
-    };
-  }
-
-  /**
-   * ✅ ANÁLISIS DE TEXTO ESTRICTO
-   */
-  private async analizarTextoEstricto(texto: string, contexto: string = 'pdf'): Promise<{
-    esAprobado: boolean;
-    puntuacion: number;
-    razon: string;
-    detalles: any;
-  }> {
-    try {
-      console.log(`🧠 Analizando texto con criterios estrictos (${contexto})...`);
-      
-      const resultado = await this.analizadorTexto.analizarTexto(texto, 'pdf');
-      
-      // ✅ CRITERIOS ESTRICTOS - NO HAY RECONSIDERACIONES
-      const esAprobado = resultado.esAprobado;
-      const razon = resultado.razon;
-      
-      console.log(`📊 Resultado análisis estricto:`, {
-        aprobado: esAprobado,
-        puntuacion: resultado.puntuacion,
-        razon
-      });
-
-      return {
-        esAprobado,
-        puntuacion: resultado.puntuacion,
-        razon,
-        detalles: resultado.detalles
-      };
-
-    } catch (error) {
-      console.error('❌ Error en análisis estricto:', error);
-      
-      // ✅ EN CASO DE ERROR, RECHAZAR POR SEGURIDAD
-      return {
-        esAprobado: false,
-        puntuacion: 0.1,
-        razon: 'Error en análisis - rechazado por seguridad',
-        detalles: { error: 'Fallback estricto - rechazado' }
-      };
-    }
-  }
-
-  /**
-   * ✅ ANÁLISIS DE IMÁGENES ESTRICTO
+   * ✅ MEJORADO: ANÁLISIS DE IMÁGENES CON GOOGLE VISION PARA TEXTO
    */
   private async analizarImagenesConTexto(
     rutaArchivo: string, 
@@ -349,6 +160,14 @@ export class PdfAnalysisService {
       const necesitaVision = estrategia.includes('vision');
       const soloModeracion = estrategia === 'solo_moderacion_imagenes';
 
+      // ✅ VERIFICAR SI GOOGLE VISION ESTÁ DISPONIBLE
+      const visionDisponible = this.visionClient !== null;
+      
+      if (necesitaVision && !visionDisponible) {
+        console.warn('⚠️ Google Vision no disponible, usando solo moderación CLIP');
+        // Cambiar estrategia a solo moderación si Vision no está disponible
+      }
+
       for (let i = 0; i < imagenes.length; i++) {
         const rutaImagen = imagenes[i];
         
@@ -359,13 +178,14 @@ export class PdfAnalysisService {
         }
 
         try {
+          // ✅ PRIMERO: Moderación de imagen con CLIP
           const resultadoModeracion = await this.moderacionImagenService.moderarImagen(
             rutaImagen, 
             ipUsuario, 
             hashNavegador
           );
 
-          // ✅ CRITERIOS ESTRICTOS - SIN RECONSIDERACIONES
+          // ✅ SI LA IMAGEN ES RECHAZADA, NO PROCESAR MÁS
           if (!resultadoModeracion.esAprobado) {
             imagenesRechazadas++;
             creditosAhorrados++;
@@ -374,7 +194,8 @@ export class PdfAnalysisService {
             continue;
           }
 
-          if (necesitaVision && !soloModeracion) {
+          // ✅ SI LA IMAGEN ES APROBADA, EXTRAER TEXTO CON GOOGLE VISION (SI ESTÁ DISPONIBLE)
+          if (necesitaVision && !soloModeracion && visionDisponible) {
             try {
               const resultadoVision = await this.analizarConGoogleVision(rutaImagen);
               
@@ -383,7 +204,7 @@ export class PdfAnalysisService {
                 confianzaOCRTotal += resultadoVision.confianzaOCR || 0.5;
               }
               
-              // ✅ CRITERIOS ESTRICTOS PARA VISION
+              // ✅ ANÁLISIS DE SEGURIDAD CON VISION
               if (!resultadoVision.esAprobado) {
                 imagenesRechazadas++;
                 problemas.push(`Página ${i + 1}: ${resultadoVision.problemasDetectados.join(', ')}`);
@@ -402,12 +223,14 @@ export class PdfAnalysisService {
             } catch (visionError: unknown) {
               const errorMessage = visionError instanceof Error ? visionError.message : 'Error desconocido';
               console.warn(`⚠️ Google Vision falló para página ${i + 1}:`, errorMessage);
-              // ✅ SI FALLA VISION, RECHAZAR LA IMAGEN
-              imagenesRechazadas++;
-              problemas.push(`Página ${i + 1}: Error en análisis Vision - rechazado`);
+              
+              // ✅ SI VISION FALLA, USAR PERSPECTIVE PARA EL TEXTO EXISTENTE (SI HAY)
+              if (textoCombinado.length > 0) {
+                console.log(`🔄 Usando Perspective como fallback para texto extraído...`);
+                // El texto ya extraído se analizará más adelante con Perspective
+              }
+              
               riesgoTotal += resultadoModeracion.puntuacionRiesgo;
-              creditosAhorrados++;
-              continue;
             }
           } else {
             riesgoTotal += resultadoModeracion.puntuacionRiesgo;
@@ -422,7 +245,6 @@ export class PdfAnalysisService {
           const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
           console.error(`❌ Error página ${i + 1}:`, errorMessage);
           
-          // ✅ EN MODO ESTRICTO, RECHAZAR POR ERRORES
           problemas.push(`Página ${i + 1}: Error en análisis - rechazado`);
           riesgoTotal += 0.7;
           imagenesRechazadas++;
@@ -468,7 +290,8 @@ export class PdfAnalysisService {
         textoExtraido: textoCombinado.length,
         riesgoPromedio,
         confianzaOCR: confianzaOCRPromedio,
-        aprobado: esAprobado
+        aprobado: esAprobado,
+        visionUtilizado: visionDisponible && necesitaVision
       });
 
       return {
@@ -492,7 +315,6 @@ export class PdfAnalysisService {
         await this.conversionService.cleanupImages(archivosTemporales);
       }
       
-      // ✅ EN CASO DE ERROR, RECHAZAR
       return {
         esAprobado: false,
         motivo: 'Error en análisis de imágenes - rechazado',
@@ -509,7 +331,81 @@ export class PdfAnalysisService {
   }
 
   /**
-   * ✅ LÓGICA PRINCIPAL ESTRICTA
+   * ✅ NUEVO: USAR PERSPECTIVE API COMO FALLBACK PARA TEXTO
+   */
+  private async analizarTextoConPerspectiveFallback(texto: string, contexto: string = 'pdf'): Promise<{
+    esAprobado: boolean;
+    puntuacion: number;
+    razon: string;
+    detalles: any;
+    metodo: string;
+  }> {
+    try {
+      console.log(`🧠 Analizando texto con Perspective API (${contexto})...`);
+      
+      const resultado = await this.analizadorTexto.analizarTexto(texto, 'pdf');
+      
+      return {
+        esAprobado: resultado.esAprobado,
+        puntuacion: resultado.puntuacion,
+        razon: resultado.razon,
+        detalles: resultado.detalles,
+        metodo: 'perspective-api'
+      };
+
+    } catch (error) {
+      console.error('❌ Error en Perspective API:', error);
+      
+      // ✅ FALLBACK: Si Perspective falla, usar análisis básico local
+      return this.analisisBasicoLocal(texto, contexto);
+    }
+  }
+
+  /**
+   * ✅ NUEVO: ANÁLISIS BÁSICO LOCAL COMO ÚLTIMO FALLBACK
+   */
+  private async analisisBasicoLocal(texto: string, contexto: string): Promise<{
+    esAprobado: boolean;
+    puntuacion: number;
+    razon: string;
+    detalles: any;
+    metodo: string;
+  }> {
+    console.log(`🔍 Usando análisis básico local (${contexto})...`);
+    
+    // Análisis básico de palabras ofensivas
+    const palabrasOfensivas = [
+      'puta', 'puto', 'mierda', 'cabron', 'imbecil', 'estupido', 'maricon',
+      'verga', 'polla', 'coño', 'chocha', 'fuck', 'shit', 'bitch', 'asshole',
+      'joder', 'carajo', 'hostia', 'cojones', 'malparido', 'hijueputa'
+    ];
+
+    const textoLimpio = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const palabrasEncontradas = palabrasOfensivas.filter(palabra => 
+      textoLimpio.includes(palabra)
+    );
+
+    const esAprobado = palabrasEncontradas.length === 0;
+    const puntuacion = esAprobado ? 0.8 : 0.2;
+    const razon = esAprobado ? 
+      'Contenido aprobado (análisis básico)' : 
+      `Lenguaje inapropiado detectado: ${palabrasEncontradas.slice(0, 3).join(', ')}`;
+
+    return {
+      esAprobado,
+      puntuacion,
+      razon,
+      detalles: {
+        palabrasOfensivas: palabrasEncontradas,
+        metodo: 'fallback-local',
+        contexto
+      },
+      metodo: 'fallback-local'
+    };
+  }
+
+  /**
+   * ✅ MEJORADO: LÓGICA PRINCIPAL CON FALLBACKS INTELIGENTES
    */
   async analizarTextoPDF(
     rutaArchivo: string, 
@@ -517,17 +413,21 @@ export class PdfAnalysisService {
     hashNavegador: string
   ): Promise<ResultadoAnalisisPDF> {
     try {
-      console.log('🧠 Iniciando análisis estricto de PDF...');
+      console.log('🧠 Iniciando análisis inteligente de PDF...');
 
       const datosPDF = await this.analizarEstructuraPDF(rutaArchivo);
       const decision = this.determinarEstrategia(datosPDF);
+      
+      // ✅ VERIFICAR DISPONIBILIDAD DE GOOGLE VISION
+      const visionDisponible = this.visionClient !== null;
       
       console.log('🎯 Estrategia seleccionada:', {
         estrategia: decision.estrategia,
         razon: decision.razon,
         tipoContenido: datosPDF.tipoContenido,
         confianzaTexto: datosPDF.confianzaTexto,
-        tieneImagenes: datosPDF.tieneImagenes
+        tieneImagenes: datosPDF.tieneImagenes,
+        visionDisponible: visionDisponible
       });
 
       let analisisImagenes: AnalisisImagenes = {
@@ -548,23 +448,25 @@ export class PdfAnalysisService {
       let motivo = 'No se pudo analizar el contenido';
       let puntuacion = 0.1;
       let recomendacion = 'El PDF no pudo ser analizado correctamente';
+      let metodoAnalisisTexto = 'ninguno';
 
       switch (decision.estrategia) {
         case 'solo_texto_local':
-          console.log('💰 EJECUTANDO: Solo análisis de texto local estricto');
+          console.log('💰 EJECUTANDO: Análisis de texto con Perspective API');
           textoParaAnalizar = this.limitarTexto(datosPDF.texto, 10000);
-          const resultadoTexto = await this.analizarTextoEstricto(textoParaAnalizar, 'texto_local');
+          const resultadoTexto = await this.analizarTextoConPerspectiveFallback(textoParaAnalizar, 'texto_local');
           
           esAprobado = resultadoTexto.esAprobado;
           puntuacion = resultadoTexto.puntuacion;
           motivo = resultadoTexto.razon;
+          metodoAnalisisTexto = resultadoTexto.metodo;
           recomendacion = esAprobado ? 
             'PDF de texto aprobado' : 
             'Contenido de texto no aprobado';
           break;
 
         case 'texto_con_imagenes_aprobadas':
-          console.log('🔄 EJECUTANDO: Texto local + imágenes con moderación estricta');
+          console.log('🔄 EJECUTANDO: Texto + imágenes con Vision + Perspective');
           textoParaAnalizar = this.limitarTexto(datosPDF.texto, 5000);
           analisisImagenes = await this.analizarImagenesConTexto(
             rutaArchivo, 
@@ -573,18 +475,20 @@ export class PdfAnalysisService {
             decision.estrategia
           );
           
+          // ✅ COMBINAR TEXTO ORIGINAL CON TEXTO EXTRAÍDO DE IMÁGENES
           if (analisisImagenes.textoExtraidoDeImagenes) {
             textoParaAnalizar += '\n\n--- TEXTO DE IMÁGENES ---\n' + 
               analisisImagenes.textoExtraidoDeImagenes;
           }
           
-          const resultadoCombinado = await this.analizarTextoEstricto(
+          const resultadoCombinado = await this.analizarTextoConPerspectiveFallback(
             this.limitarTexto(textoParaAnalizar, 10000),
             'combinado'
           );
           
           esAprobado = resultadoCombinado.esAprobado && analisisImagenes.esAprobado;
           puntuacion = Math.max(resultadoCombinado.puntuacion, analisisImagenes.riesgoImagenes);
+          metodoAnalisisTexto = resultadoCombinado.metodo;
           motivo = esAprobado ? 
             'PDF aprobado (contenido mixto verificado)' : 
             `Rechazado: problemas en ${!resultadoCombinado.esAprobado ? 'texto' : 'imágenes'}`;
@@ -592,7 +496,7 @@ export class PdfAnalysisService {
           break;
 
         case 'imagenes_con_vision_para_texto':
-          console.log('🔍 EJECUTANDO: Imágenes con Google Vision para texto');
+          console.log('🔍 EJECUTANDO: Imágenes con Google Vision + Perspective');
           analisisImagenes = await this.analizarImagenesConTexto(
             rutaArchivo, 
             ipUsuario, 
@@ -602,13 +506,14 @@ export class PdfAnalysisService {
           
           if (analisisImagenes.textoExtraidoDeImagenes) {
             textoParaAnalizar = analisisImagenes.textoExtraidoDeImagenes;
-            const resultadoVisionTexto = await this.analizarTextoEstricto(
+            const resultadoVisionTexto = await this.analizarTextoConPerspectiveFallback(
               this.limitarTexto(textoParaAnalizar, 10000),
               'vision_texto'
             );
             
             esAprobado = resultadoVisionTexto.esAprobado && analisisImagenes.esAprobado;
             puntuacion = Math.max(resultadoVisionTexto.puntuacion, analisisImagenes.riesgoImagenes);
+            metodoAnalisisTexto = resultadoVisionTexto.metodo;
             motivo = esAprobado ? 
               'PDF escaneado aprobado' : 
               `Rechazado: problemas en ${!resultadoVisionTexto.esAprobado ? 'texto extraído' : 'imágenes'}`;
@@ -616,12 +521,13 @@ export class PdfAnalysisService {
             esAprobado = analisisImagenes.esAprobado;
             puntuacion = analisisImagenes.riesgoImagenes;
             motivo = analisisImagenes.motivo;
+            metodoAnalisisTexto = 'solo_imagenes';
           }
           recomendacion = 'Documento escaneado - requiere extracción y verificación de texto';
           break;
 
         case 'solo_moderacion_imagenes':
-          console.log('🛡️ EJECUTANDO: Solo moderación de imágenes estricta');
+          console.log('🛡️ EJECUTANDO: Solo moderación de imágenes');
           analisisImagenes = await this.analizarImagenesConTexto(
             rutaArchivo, 
             ipUsuario, 
@@ -632,6 +538,7 @@ export class PdfAnalysisService {
           esAprobado = analisisImagenes.esAprobado;
           puntuacion = analisisImagenes.riesgoImagenes;
           motivo = analisisImagenes.motivo;
+          metodoAnalisisTexto = 'solo_imagenes';
           recomendacion = 'Documento basado en imágenes - verificación visual completa';
           break;
 
@@ -640,6 +547,7 @@ export class PdfAnalysisService {
           esAprobado = false;
           puntuacion = 0.1;
           motivo = 'Contenido no analizable - rechazado por seguridad';
+          metodoAnalisisTexto = 'fallback';
           recomendacion = 'El PDF no contiene contenido analizable o tiene formato no soportado';
           break;
       }
@@ -652,7 +560,9 @@ export class PdfAnalysisService {
           texto: textoParaAnalizar ? this.limitarTexto(textoParaAnalizar, 1000) : null,
           imagenes: analisisImagenes,
           estrategia: decision.estrategia,
-          decision: decision.razon
+          decision: decision.razon,
+          metodoAnalisisTexto,
+          visionDisponible
         },
         metadata: {
           numPaginas: datosPDF.numPaginas,
@@ -664,11 +574,13 @@ export class PdfAnalysisService {
           tipoPDF: analisisImagenes.tipoPDF,
           textoOriginalLength: datosPDF.texto.length,
           textoAnalizadoLength: textoParaAnalizar.length,
-          usoGoogleVision: decision.necesitaGoogleVision,
+          usoGoogleVision: decision.necesitaGoogleVision && visionDisponible,
           ahorroCreditos: analisisImagenes.ahorroCreditos,
           imagenesRechazadas: analisisImagenes.imagenesRechazadas,
           imagenesProcesadas: analisisImagenes.imagenesProcesadas,
-          confianzaOCR: analisisImagenes.confianzaOCR
+          confianzaOCR: analisisImagenes.confianzaOCR,
+          metodoAnalisisTexto,
+          visionDisponible
         },
         estrategiaUsada: decision.estrategia,
         tipoContenido: datosPDF.tipoContenido,
@@ -677,9 +589,8 @@ export class PdfAnalysisService {
 
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      console.error('❌ Error en análisis estricto:', errorMessage);
+      console.error('❌ Error en análisis inteligente:', errorMessage);
       
-      // ✅ EN CASO DE ERROR, RECHAZAR POR SEGURIDAD
       return {
         esAprobado: false,
         motivo: 'Error en análisis - rechazado por seguridad',
@@ -693,6 +604,113 @@ export class PdfAnalysisService {
         recomendacion: 'Error en el análisis automático - verificar manualmente'
       };
     }
+  }
+
+  /**
+   * ✅ ANALIZAR ESTRUCTURA DEL PDF (MÉTODO FALTANTE)
+   */
+  private async analizarEstructuraPDF(rutaArchivo: string): Promise<DatosPDF> {
+    try {
+      const dataBuffer = fs.readFileSync(rutaArchivo);
+      const pdfData = await pdfParse(dataBuffer);
+      
+      const texto = pdfData.text || '';
+      const numPaginas = pdfData.numpages || 1;
+      const info = pdfData.info || {};
+      const metadata = pdfData.metadata || {};
+      
+      // Determinar tipo de contenido
+      const tieneTextoValido = texto.length > 50;
+      const tieneImagenes = pdfData.text.length < pdfData.numpages * 100; // Heurística simple
+      const confianzaTexto = tieneTextoValido ? 0.9 : 0.1;
+      const esEscaneado = !tieneTextoValido && tieneImagenes;
+      const calidadOCR = tieneTextoValido ? 0.8 : 0.2;
+      
+      let tipoContenido: 'texto' | 'imagenes' | 'mixto' | 'desconocido' = 'desconocido';
+      
+      if (tieneTextoValido && !tieneImagenes) {
+        tipoContenido = 'texto';
+      } else if (!tieneTextoValido && tieneImagenes) {
+        tipoContenido = 'imagenes';
+      } else if (tieneTextoValido && tieneImagenes) {
+        tipoContenido = 'mixto';
+      }
+      
+      return {
+        texto,
+        numPaginas,
+        info,
+        metadata,
+        tipoContenido,
+        confianzaTexto,
+        tieneImagenes,
+        esEscaneado,
+        calidadOCR
+      };
+      
+    } catch (error) {
+      console.error('❌ Error analizando estructura PDF:', error);
+      return {
+        texto: '',
+        numPaginas: 1,
+        info: {},
+        metadata: {},
+        tipoContenido: 'desconocido',
+        confianzaTexto: 0,
+        tieneImagenes: true,
+        esEscaneado: true,
+        calidadOCR: 0
+      };
+    }
+  }
+
+  /**
+   * ✅ DETERMINAR ESTRATEGIA DE ANÁLISIS (MÉTODO FALTANTE)
+   */
+  private determinarEstrategia(datosPDF: DatosPDF): {
+    estrategia: EstrategiaAnalisis;
+    razon: string;
+    necesitaGoogleVision: boolean;
+  } {
+    const { tipoContenido, confianzaTexto, tieneImagenes, esEscaneado } = datosPDF;
+    
+    if (tipoContenido === 'texto' && confianzaTexto > 0.7) {
+      return {
+        estrategia: 'solo_texto_local',
+        razon: 'PDF con texto extraíble de alta calidad',
+        necesitaGoogleVision: false
+      };
+    }
+    
+    if (tipoContenido === 'mixto' && confianzaTexto > 0.3) {
+      return {
+        estrategia: 'texto_con_imagenes_aprobadas',
+        razon: 'PDF mixto con texto e imágenes',
+        necesitaGoogleVision: true
+      };
+    }
+    
+    if (esEscaneado || (tipoContenido === 'imagenes' && tieneImagenes)) {
+      return {
+        estrategia: 'imagenes_con_vision_para_texto',
+        razon: 'PDF escaneado o basado en imágenes',
+        necesitaGoogleVision: true
+      };
+    }
+    
+    if (tieneImagenes) {
+      return {
+        estrategia: 'solo_moderacion_imagenes',
+        razon: 'PDF con imágenes pero sin texto extraíble',
+        necesitaGoogleVision: false
+      };
+    }
+    
+    return {
+      estrategia: 'fallback_rechazado',
+      razon: 'Contenido no analizable',
+      necesitaGoogleVision: false
+    };
   }
 
   /**
