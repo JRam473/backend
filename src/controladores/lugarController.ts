@@ -2508,152 +2508,152 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
   },
 
 
-  /**
-   * ✅ MEJORADO: Actualizar descripción de imagen con mejor manejo de errores
-   */
-  async actualizarDescripcionImagen(req: Request, res: Response) {
-    const client = await pool.connect();
+/**
+ * ✅ CORREGIDO: Actualizar descripción de imagen con mejor manejo de errores
+ */
+async actualizarDescripcionImagen(req: Request, res: Response) {
+  const client = await pool.connect();
+  
+  try {
+    const { id, imagenId } = req.params;
+    const { descripcion } = req.body;
+
+    if (!descripcion || descripcion.trim().length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'La descripción es requerida' 
+      });
+    }
+
+    console.log('✏️ Actualizando descripción de imagen con moderación:', { 
+      lugarId: id, 
+      imagenId, 
+      descripcion: descripcion.substring(0, 50) + '...' 
+    });
+
+    await client.query('BEGIN');
+
+    // ✅ 1. VERIFICAR QUE LA IMAGEN PERTENECE AL LUGAR
+    const imagenResult = await client.query(
+      'SELECT * FROM fotos_lugares WHERE id = $1 AND lugar_id = $2',
+      [imagenId, id]
+    );
+
+    if (imagenResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ 
+        success: false,
+        error: 'Imagen no encontrada o no pertenece al lugar' 
+      });
+    }
+
+    const imagenActual = imagenResult.rows[0];
     
-    try {
-      const { id, imagenId } = req.params;
-      const { descripcion } = req.body;
-
-      if (!descripcion || descripcion.trim().length === 0) {
-        return res.status(400).json({ 
-          success: false,
-          error: 'La descripción es requerida' 
-        });
-      }
-
-      console.log('✏️ Actualizando descripción de imagen con moderación:', { 
-        lugarId: id, 
-        imagenId, 
-        descripcion: descripcion.substring(0, 50) + '...' 
-      });
-
-      await client.query('BEGIN');
-
-      // ✅ 1. VERIFICAR QUE LA IMAGEN PERTENECE AL LUGAR
-      const imagenResult = await client.query(
-        'SELECT * FROM fotos_lugares WHERE id = $1 AND lugar_id = $2',
-        [imagenId, id]
-      );
-
-      if (imagenResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ 
-          success: false,
-          error: 'Imagen no encontrada o no pertenece al lugar' 
-        });
-      }
-
-      const imagenActual = imagenResult.rows[0];
-      
-      // ✅ 2. VERIFICAR SI LA DESCRIPCIÓN REALMENTE CAMBIÓ
-      if (descripcion.trim() === imagenActual.descripcion) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          success: false,
-          error: 'La descripción proporcionada es igual a la actual',
-          detalles: {
-            descripcion_actual: imagenActual.descripcion,
-            descripcion_nueva: descripcion.trim()
-          }
-        });
-      }
-
-      // ✅ 3. APLICAR MODERACIÓN A LA NUEVA DESCRIPCIÓN
-      const hashNavegador = generarHashNavegador(req);
-      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-      const moderacionService = new ModeracionService();
-      
-      const resultadoModeracion = await moderacionService.moderarTexto(
-        descripcion.trim(),
-        ipUsuario,
-        hashNavegador
-      );
-
-      // ✅ SI ES RECHAZADO: Rollback y responder con error
-      if (!resultadoModeracion.esAprobado) {
-        await client.query('ROLLBACK');
-        
-        console.log('❌ Descripción de imagen rechazada por moderación:', resultadoModeracion.motivoRechazo);
-        
-        const { mensajeUsuario, tipoProblema, detallesEspecificos } = analizarMotivoRechazoLugar(resultadoModeracion);
-
-        return res.status(400).json({
-          success: false,
-          error: 'DESCRIPCION_RECHAZADA',
-          message: mensajeUsuario,
-          motivo: resultadoModeracion.motivoRechazo,
-          tipo: tipoProblema,
-          detalles: {
-            puntuacion: resultadoModeracion.puntuacionGeneral,
-            problemas: detallesEspecificos,
-            sugerencias: generarSugerenciasLugar('descripcion_foto'),
-            campoEspecifico: 'descripcion_foto',
-            timestamp: new Date().toISOString()
-          }
-        });
-      }
-
-      // ✅ 4. ACTUALIZAR DESCRIPCIÓN APROBADA
-      await client.query(
-        'UPDATE fotos_lugares SET descripcion = $1, actualizado_en = NOW() WHERE id = $2',
-        [descripcion.trim(), imagenId]
-      );
-
-      await client.query('COMMIT');
-
-      console.log('✅ Descripción de imagen actualizada y aprobada:', { 
-        imagenId, 
-        lugarId: id 
-      });
-
-      res.json({ 
-        success: true,
-        mensaje: 'Descripción actualizada exitosamente',
-        imagen: {
-          id: imagenId,
-          descripcion: descripcion.trim(),
-          lugar_id: id,
-          es_principal: imagenActual.es_principal
-        },
-        moderacion: {
-          esAprobado: true,
-          puntuacion: resultadoModeracion.puntuacionGeneral,
-          timestamp: new Date().toISOString()
-        },
-        cambios: {
-          descripcion_anterior: imagenActual.descripcion,
-          descripcion_nueva: descripcion.trim(),
-          modificado: true
+    // ✅ 2. VERIFICAR SI LA DESCRIPCIÓN REALMENTE CAMBIÓ
+    if (descripcion.trim() === imagenActual.descripcion) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        error: 'La descripción proporcionada es igual a la actual',
+        detalles: {
+          descripcion_actual: imagenActual.descripcion,
+          descripcion_nueva: descripcion.trim()
         }
       });
-
-    } catch (error) {
-      await client.query('ROLLBACK').catch(console.error);
-      
-      console.error('❌ Error actualizando descripción:', error);
-      
-      // Manejar errores de moderación específicos
-      if (error instanceof Error && error.message.includes('DESCRIPCION_RECHAZADA')) {
-        return res.status(400).json({
-          success: false,
-          error: 'DESCRIPCION_RECHAZADA',
-          message: error.message
-        });
-      }
-      
-      res.status(500).json({ 
-        success: false,
-        error: 'Error al actualizar descripción',
-        detalle: error instanceof Error ? error.message : 'Error desconocido'
-      });
-    } finally {
-      client.release();
     }
-  },
+
+    // ✅ 3. APLICAR MODERACIÓN A LA NUEVA DESCRIPCIÓN
+    const hashNavegador = generarHashNavegador(req);
+    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+    const moderacionService = new ModeracionService();
+    
+    const resultadoModeracion = await moderacionService.moderarTexto(
+      descripcion.trim(),
+      ipUsuario,
+      hashNavegador
+    );
+
+    // ✅ SI ES RECHAZADO: Rollback y responder con error detallado
+    if (!resultadoModeracion.esAprobado) {
+      await client.query('ROLLBACK');
+      
+      console.log('❌ Descripción de imagen rechazada por moderación:', resultadoModeracion.motivoRechazo);
+      
+      const { mensajeUsuario, tipoProblema, detallesEspecificos, campoEspecifico } = analizarMotivoRechazoLugar(resultadoModeracion);
+
+      return res.status(400).json({
+        success: false,
+        error: 'CONTENIDO_RECHAZADO', // ✅ CAMBIADO de 'DESCRIPCION_RECHAZADA'
+        message: mensajeUsuario,
+        motivo: resultadoModeracion.motivoRechazo,
+        tipo: tipoProblema,
+        detalles: {
+          puntuacion: resultadoModeracion.puntuacionGeneral,
+          problemas: detallesEspecificos,
+          sugerencias: generarSugerenciasLugar('descripcion_foto'),
+          campoEspecifico: 'descripcion_foto',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // ✅ 4. ACTUALIZAR DESCRIPCIÓN APROBADA
+    await client.query(
+      'UPDATE fotos_lugares SET descripcion = $1, actualizado_en = NOW() WHERE id = $2',
+      [descripcion.trim(), imagenId]
+    );
+
+    await client.query('COMMIT');
+
+    console.log('✅ Descripción de imagen actualizada y aprobada:', { 
+      imagenId, 
+      lugarId: id 
+    });
+
+    res.json({ 
+      success: true,
+      mensaje: 'Descripción actualizada exitosamente',
+      imagen: {
+        id: imagenId,
+        descripcion: descripcion.trim(),
+        lugar_id: id,
+        es_principal: imagenActual.es_principal
+      },
+      moderacion: {
+        esAprobado: true,
+        puntuacion: resultadoModeracion.puntuacionGeneral,
+        timestamp: new Date().toISOString()
+      },
+      cambios: {
+        descripcion_anterior: imagenActual.descripcion,
+        descripcion_nueva: descripcion.trim(),
+        modificado: true
+      }
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK').catch(console.error);
+    
+    console.error('❌ Error actualizando descripción:', error);
+    
+    // ✅ CORREGIDO: Manejar errores de moderación específicos
+    if (error instanceof Error && error.message.includes('CONTENIDO_RECHAZADO')) {
+      return res.status(400).json({
+        success: false,
+        error: 'CONTENIDO_RECHAZADO',
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al actualizar descripción',
+      detalle: error instanceof Error ? error.message : 'Error desconocido'
+    });
+  } finally {
+    client.release();
+  }
+},
 
   /**
    * ✅ ACTUALIZADO: Eliminar imagen principal CON Cloudinary
@@ -3030,135 +3030,6 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
       client.release();
     }
   },
-  // 🔒 MÉTODOS PRIVADOS - Actualizados para solo texto
-
-/**
- * Analizar motivo de rechazo para mensajes específicos al usuario (actualizado para incluir descripciones de fotos)
- */
-analizarMotivoRechazo(resultadoModeracion: any): { 
-  mensajeUsuario: string; 
-  tipoProblema: string; 
-  detallesEspecificos: string[];
-  campoEspecifico: 'nombre' | 'descripcion' | 'descripcion_foto' | 'ambos';
-} {
-  const detallesEspecificos: string[] = [];
-  let mensajeUsuario = 'El contenido no cumple con nuestras políticas';
-  let tipoProblema = 'general';
-  let campoEspecifico: 'nombre' | 'descripcion' | 'descripcion_foto' | 'ambos' = 'ambos';
-
-  console.log('🔍 Analizando motivo de rechazo:', resultadoModeracion);
-
-  // ✅ CORREGIDO: Verificar la estructura real del objeto de moderación
-  if (!resultadoModeracion.esAprobado) {
-    tipoProblema = 'texto';
-    
-    // Obtener el motivo de rechazo
-    const motivoRechazo = resultadoModeracion.motivoRechazo || '';
-    const puntuacionGeneral = resultadoModeracion.puntuacionGeneral || 0;
-    
-    // ✅ CORREGIDO: Analizar el motivo de rechazo directamente
-    if (motivoRechazo.includes('ofensivo') || motivoRechazo.includes('ofensiva') || motivoRechazo.includes('inapropiado')) {
-      mensajeUsuario = 'El contenido contiene lenguaje ofensivo o inapropiado';
-      detallesEspecificos.push('Se detectaron palabras ofensivas en el contenido');
-      
-      // ✅ MEJORADO: Determinar campo específico basado en contexto
-      if (motivoRechazo.includes('nombre') || resultadoModeracion.tipoContenido === 'nombre') {
-        campoEspecifico = 'nombre';
-        mensajeUsuario = 'El nombre contiene lenguaje ofensivo o inapropiado';
-      } else if (motivoRechazo.includes('descripción') || motivoRechazo.includes('descripcion') || resultadoModeracion.tipoContenido === 'descripcion') {
-        campoEspecifico = 'descripcion';
-        mensajeUsuario = 'La descripción contiene lenguaje ofensivo o inapropiado';
-      } else if (motivoRechazo.includes('foto') || motivoRechazo.includes('imagen') || resultadoModeracion.tipoContenido === 'descripcion_foto') {
-        campoEspecifico = 'descripcion_foto';
-        mensajeUsuario = 'La descripción de la foto contiene lenguaje ofensivo o inapropiado';
-      }
-      
-    } else if (motivoRechazo.includes('spam') || motivoRechazo.includes('comercial') || motivoRechazo.includes('promocional')) {
-      mensajeUsuario = 'El contenido contiene elementos comerciales no permitidos';
-      detallesEspecificos.push('Se detectó contenido promocional o spam');
-      
-      // ✅ MEJORADO: Determinar campo específico
-      if (motivoRechazo.includes('foto') || motivoRechazo.includes('imagen') || resultadoModeracion.tipoContenido === 'descripcion_foto') {
-        campoEspecifico = 'descripcion_foto';
-        mensajeUsuario = 'La descripción de la foto contiene contenido comercial no permitido';
-      } else if (motivoRechazo.includes('descripción') || motivoRechazo.includes('descripcion') || resultadoModeracion.tipoContenido === 'descripcion') {
-        campoEspecifico = 'descripcion';
-        mensajeUsuario = 'La descripción contiene contenido comercial no permitido';
-      } else {
-        campoEspecifico = 'descripcion';
-        mensajeUsuario = 'El contenido contiene elementos comerciales no permitidos';
-      }
-      
-    } else if (motivoRechazo.includes('sentido') || motivoRechazo.includes('coherente') || motivoRechazo.includes('incomprensible')) {
-      mensajeUsuario = 'El contenido no tiene sentido o es muy corto';
-      detallesEspecificos.push('El texto debe ser coherente y tener sentido');
-      
-      // ✅ MEJORADO: Determinar campo específico
-      if (motivoRechazo.includes('foto') || motivoRechazo.includes('imagen') || resultadoModeracion.tipoContenido === 'descripcion_foto') {
-        campoEspecifico = 'descripcion_foto';
-        mensajeUsuario = 'La descripción de la foto no tiene sentido o es muy corta';
-      } else if (motivoRechazo.includes('descripción') || motivoRechazo.includes('descripcion') || resultadoModeracion.tipoContenido === 'descripcion') {
-        campoEspecifico = 'descripcion';
-        mensajeUsuario = 'La descripción no tiene sentido o es muy corta';
-      } else {
-        campoEspecifico = 'descripcion';
-        mensajeUsuario = 'El contenido no tiene sentido o es muy corto';
-      }
-      
-    } else if (motivoRechazo.includes('URL') || motivoRechazo.includes('email') || motivoRechazo.includes('teléfono') || motivoRechazo.includes('enlace') || motivoRechazo.includes('contacto')) {
-      mensajeUsuario = 'El contenido contiene enlaces o información de contacto no permitida';
-      detallesEspecificos.push('No se permiten URLs, emails o números de teléfono');
-      
-      // ✅ MEJORADO: Determinar campo específico
-      if (motivoRechazo.includes('foto') || motivoRechazo.includes('imagen') || resultadoModeracion.tipoContenido === 'descripcion_foto') {
-        campoEspecifico = 'descripcion_foto';
-        mensajeUsuario = 'La descripción de la foto contiene enlaces o información de contacto';
-      } else if (motivoRechazo.includes('descripción') || motivoRechazo.includes('descripcion') || resultadoModeracion.tipoContenido === 'descripcion') {
-        campoEspecifico = 'descripcion';
-        mensajeUsuario = 'La descripción contiene enlaces o información de contacto';
-      } else {
-        campoEspecifico = 'descripcion';
-        mensajeUsuario = 'El contenido contiene enlaces o información de contacto';
-      }
-    } else {
-      // Motivo genérico
-      detallesEspecificos.push(motivoRechazo || 'Contenido no aprobado por las políticas de moderación');
-    }
-
-    // ✅ NUEVO: Agregar detalles específicos del análisis si están disponibles
-    if (resultadoModeracion.detalles?.analisisTexto) {
-      const analisis = resultadoModeracion.detalles.analisisTexto;
-      
-      if (analisis.palabrasOfensivas?.length > 0) {
-        detallesEspecificos.push(`Palabras detectadas: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
-      }
-      
-      if (analisis.razon) {
-        detallesEspecificos.push(`Razón: ${analisis.razon}`);
-      }
-    }
-  }
-
-  // Agregar puntuación a los detalles si está disponible
-  if (resultadoModeracion.puntuacionGeneral) {
-    detallesEspecificos.push(`Puntuación de riesgo: ${(resultadoModeracion.puntuacionGeneral * 100).toFixed(1)}%`);
-  }
-
-  // ✅ NUEVO: Si no hay detalles específicos, agregar uno genérico
-  if (detallesEspecificos.length === 0) {
-    detallesEspecificos.push('El contenido no cumple con las políticas de la comunidad');
-  }
-
-  console.log('✅ Resultado del análisis:', { 
-    mensajeUsuario, 
-    tipoProblema, 
-    detallesEspecificos, 
-    campoEspecifico,
-    motivoRechazo: resultadoModeracion.motivoRechazo 
-  });
-
-  return { mensajeUsuario, tipoProblema, detallesEspecificos, campoEspecifico };
-},
 
 /**
  * Generar sugerencias según el tipo de problema (actualizado para incluir descripciones de fotos)
