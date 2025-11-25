@@ -604,7 +604,7 @@ export const lugarController = {
 
         return res.status(400).json({
           success: false,
-          error: 'CONTENIDO_RECHAZADO',
+          error: 'CONTENIDO_RECHAZADOs',
           message: 'El contenido no cumple con las políticas de moderación',
           motivo: resultadoModeracionTexto.motivoRechazo,
           tipo: 'moderacion_texto',
@@ -1063,7 +1063,7 @@ async subirPDFTemporal(req: Request, res: Response) {
           
           return res.status(400).json({
             success: false,
-            error: 'CONTENIDO_RECHAZADO',
+            error: 'CONTENIDO_RECHAZADvO',
             message: mensajeUsuario,
             motivo: resultadoModeracion.motivoRechazo,
             tipo: tipoProblema,
@@ -2393,126 +2393,119 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
     }
   },
 
-/**
- * ✅ CORREGIDO: Validar descripción de foto antes de crear/actualizar - CON FORMATO UNIFICADO
- */
-async validarDescripcionFotoPrev(req: Request, res: Response) {
-  try {
-    const { descripcion } = req.body;
-    
-    if (!descripcion?.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: 'Descripción de foto requerida para validación'
-      });
-    }
-
-    const hashNavegador = generarHashNavegador(req);
-    const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
-
-    console.log('🔍 Validando descripción de foto previo:', {
-      descripcion: descripcion ? `"${descripcion.substring(0, 50)}..."` : 'undefined',
-      hash: hashNavegador.substring(0, 10) + '...',
-      ip: ipUsuario
-    });
-
-    const moderacionService = new ModeracionService();
-
-    const resultadoModeracion = await moderacionService.moderarTexto(
-      descripcion.trim(),
-      ipUsuario,
-      hashNavegador
-    );
-
-    // ✅ SI ES RECHAZADO: Devolver formato unificado con CONTENIDO_RECHAZADO
-    if (!resultadoModeracion.esAprobado) {
-      console.log('❌ Descripción de foto rechazada en validación previa:', resultadoModeracion.motivoRechazo);
+ /**
+   * ✅ NUEVO: Validar descripción de foto antes de crear/actualizar - CORREGIDO
+   */
+  async validarDescripcionFotoPrev(req: Request, res: Response) {
+    try {
+      const { descripcion } = req.body;
       
-      // Buscar el log más reciente para obtener detalles específicos
-      const logReciente = await pool.query(
-        `SELECT motivo, resultado_moderacion 
-         FROM logs_moderacion 
-         WHERE hash_navegador = $1 
-         ORDER BY creado_en DESC 
-         LIMIT 1`,
-        [hashNavegador]
+      if (!descripcion?.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Descripción de foto requerida para validación'
+        });
+      }
+
+      const hashNavegador = generarHashNavegador(req);
+      const ipUsuario = req.ip || req.connection.remoteAddress || 'unknown';
+
+      console.log('🔍 Validando descripción de foto previo:', {
+        descripcion: descripcion ? `"${descripcion.substring(0, 50)}..."` : 'undefined',
+        hash: hashNavegador.substring(0, 10) + '...',
+        ip: ipUsuario
+      });
+
+      const moderacionService = new ModeracionService();
+
+      // ✅ CORREGIDO: Solo 3 argumentos
+      const resultadoModeracion = await moderacionService.moderarTexto(
+        descripcion.trim(),
+        ipUsuario,
+        hashNavegador
       );
 
-      let motivoDetallado = resultadoModeracion.motivoRechazo;
-      let detallesEspecificos: string[] = [];
-
-      if (logReciente.rows.length > 0) {
-        const log = logReciente.rows[0];
-        motivoDetallado = log.motivo;
+      // ✅ SI ES RECHAZADO: Devolver motivo específico del log
+      if (!resultadoModeracion.esAprobado) {
+        console.log('❌ Descripción de foto rechazada en validación previa:', resultadoModeracion.motivoRechazo);
         
-        // Extraer detalles específicos del resultado de moderación
-        try {
-          const resultado = JSON.parse(log.resultado_moderacion);
-          if (resultado.analisisTexto) {
-            const analisis = resultado.analisisTexto;
-            if (analisis.palabrasOfensivas?.length > 0) {
-              detallesEspecificos.push(`Lenguaje inapropiado detectado (${analisis.palabrasOfensivas.length} palabras ofensivas)`);
-              if (analisis.palabrasOfensivas.length > 0) {
+        // Buscar el log más reciente para obtener detalles específicos
+        const logReciente = await pool.query(
+          `SELECT motivo, resultado_moderacion 
+           FROM logs_moderacion 
+           WHERE hash_navegador = $1 
+           ORDER BY creado_en DESC 
+           LIMIT 1`,
+          [hashNavegador]
+        );
+
+        let motivoDetallado = resultadoModeracion.motivoRechazo;
+        let detallesEspecificos: string[] = [];
+
+        if (logReciente.rows.length > 0) {
+          const log = logReciente.rows[0];
+          motivoDetallado = log.motivo;
+          
+          // Extraer detalles específicos del resultado de moderación
+          try {
+            const resultado = JSON.parse(log.resultado_moderacion);
+            if (resultado.analisisTexto) {
+              const analisis = resultado.analisisTexto;
+              if (analisis.palabrasOfensivas?.length > 0) {
                 detallesEspecificos.push(`Palabras problemáticas: ${analisis.palabrasOfensivas.slice(0, 3).join(', ')}`);
               }
+              if (analisis.razon) {
+                detallesEspecificos.push(`Razón: ${analisis.razon}`);
+              }
             }
-            if (analisis.razon) {
-              detallesEspecificos.push(`Razón: ${analisis.razon}`);
-            }
+          } catch (error) {
+            console.error('Error parseando resultado moderación:', error);
           }
-        } catch (error) {
-          console.error('Error parseando resultado moderación:', error);
         }
+
+        // ✅ ANÁLISIS ESPECÍFICO PARA DESCRIPCIONES DE FOTOS
+        const { mensajeUsuario, tipoProblema, campoEspecifico } = analizarMotivoRechazoLugar(resultadoModeracion);
+
+        return res.status(400).json({
+          success: false,
+          error: 'TEXTO_RECHAZADO',
+          message: mensajeUsuario,
+          motivo: motivoDetallado,
+          tipo: tipoProblema,
+          detalles: {
+            puntuacion: resultadoModeracion.puntuacionGeneral,
+            problemas: detallesEspecificos,
+            sugerencias: generarSugerenciasLugar('descripcion_foto'),
+            campoEspecifico: 'descripcion_foto',
+            timestamp: new Date().toISOString()
+          }
+        });
       }
 
-      // ✅ ANÁLISIS ESPECÍFICO PARA DESCRIPCIONES DE FOTOS
-      const { mensajeUsuario, tipoProblema, campoEspecifico } = analizarMotivoRechazoLugar(resultadoModeracion);
-
-      // ✅ CALCULAR PORCENTAJE DE RIESGO
-      const puntuacionRiesgo = resultadoModeracion.puntuacionGeneral || 0;
-      const porcentajeRiesgo = (puntuacionRiesgo * 100).toFixed(1);
-
-      return res.status(400).json({
-        success: false,
-        error: 'CONTENIDO_RECHAZADO', // ✅ CAMBIADO de 'TEXTO_RECHAZADO' a 'CONTENIDO_RECHAZADO'
-        message: mensajeUsuario,
-        motivo: motivoDetallado,
-        tipo: tipoProblema,
+      // ✅ SI TODO ES APROBADO
+      console.log('✅ Descripción de foto aprobada en validación previa');
+      
+      res.json({
+        success: true,
+        esAprobado: true,
+        mensaje: 'Descripción de foto aprobada, puedes continuar',
+        puntuacion: resultadoModeracion.puntuacionGeneral,
         detalles: {
-          puntuacion: puntuacionRiesgo,
-          porcentajeRiesgo: `${porcentajeRiesgo}%`,
-          problemas: detallesEspecificos.length > 0 ? detallesEspecificos : [motivoDetallado || 'Contenido no aprobado'],
-          sugerencias: generarSugerenciasLugar('descripcion_foto'),
-          campoEspecifico: 'descripcion_foto',
-          timestamp: new Date().toISOString()
+          texto: resultadoModeracion.detalles?.texto
         }
       });
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('❌ Error validando descripción de foto:', errorMessage);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Error al validar descripción de foto',
+        message: errorMessage
+      });
     }
-
-    // ✅ SI TODO ES APROBADO
-    console.log('✅ Descripción de foto aprobada en validación previa');
-    
-    res.json({
-      success: true,
-      esAprobado: true,
-      mensaje: 'Descripción de foto aprobada, puedes continuar',
-      puntuacion: resultadoModeracion.puntuacionGeneral,
-      detalles: {
-        texto: resultadoModeracion.detalles?.texto
-      }
-    });
-
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('❌ Error validando descripción de foto:', errorMessage);
-    
-    res.status(500).json({
-      success: false,
-      error: 'Error al validar descripción de foto',
-      message: errorMessage
-    });
-  }
-},
+  },
 
 
 /**
@@ -2590,7 +2583,7 @@ async actualizarDescripcionImagen(req: Request, res: Response) {
 
       return res.status(400).json({
         success: false,
-        error: 'CONTENIDO_RECHAZADO', // ✅ CAMBIADO de 'DESCRIPCION_RECHAZADA'
+        error: 'CONTENIDO_RECHAZADOg', // ✅ CAMBIADO de 'DESCRIPCION_RECHAZADA'
         message: mensajeUsuario,
         motivo: resultadoModeracion.motivoRechazo,
         tipo: tipoProblema,
@@ -2644,10 +2637,10 @@ async actualizarDescripcionImagen(req: Request, res: Response) {
     console.error('❌ Error actualizando descripción:', error);
     
     // ✅ CORREGIDO: Manejar errores de moderación específicos
-    if (error instanceof Error && error.message.includes('CONTENIDO_RECHAZADO')) {
+    if (error instanceof Error && error.message.includes('CONTENIDO_RECHAZADOf')) {
       return res.status(400).json({
         success: false,
-        error: 'CONTENIDO_RECHAZADO',
+        error: 'CONTENIDO_RECHAZADOd',
         message: error.message
       });
     }
