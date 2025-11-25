@@ -341,7 +341,7 @@ export const lugarController = {
 
         return res.status(400).json({
           success: false,
-          error: 'TEXTO_RECHAZADO',
+          error: 'TEXTO_RECHAZADOf',
           message: mensajeUsuario,
           motivo: motivoDetallado,
           tipo: tipoProblema,
@@ -2468,7 +2468,7 @@ async subirPDFLugarConModeracion(req: Request, res: Response) {
 
         return res.status(400).json({
           success: false,
-          error: 'TEXTO_RECHAZADO',
+          error: 'TEXTO_RECHAZADOs',
           message: mensajeUsuario,
           motivo: motivoDetallado,
           tipo: tipoProblema,
